@@ -1,0 +1,832 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // دوال مساعدة (Helper Functions)
+    // =========================================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(email) {
+      return isAuthenticated() 
+        && request.auth.token.email != null 
+        && normalizeEmail(request.auth.token.email) == normalizeEmail(email);
+    }
+
+    // ✅ إصلاح: كانت الدالة lower() فقط بينما التطبيق يستخدم
+    // EmailNormalizationService.normalize() الذي يحذف +tag والنقاط
+    // لحسابات Gmail. النتيجة: صاحب البريد a.hmed@gmail.com كان
+    // معرّف مؤسسته ahmed@gmail.com فترفضه القواعد (isOwner false) على
+    // كل مستنداته. نطابق التطبيع في الجهتين (نفس المنطق: تصغير الأحرف،
+    // حذف +tag، وحذف النقاط لجيميل/جوجل فقط).
+    function normalizeEmail(email) {
+      let lower = email.lower();
+      let localPart = lower.split('@')[0].split('+')[0];
+      let domain = lower.split('@')[1];
+      let isGmail = domain == 'gmail.com' || domain == 'googlemail.com';
+      let normalizedLocal = isGmail ? localPart.replace('.', '') : localPart;
+      return normalizedLocal + '@' + domain;
+    }
+
+    function isValidEmail(email) {
+      return email.matches('^[^@]+@[^@]+\\.[^@]+$');
+    }
+
+    // التحقق من أن القيمة نصية وغير فارغة
+    function isNonEmptyString(value) {
+      return value is string && value.size() > 0;
+    }
+
+    // التحقق من وجود صلاحية في قائمة الصلاحيات
+    function hasPermission(permissionName) {
+      return isAuthenticated()
+             && request.auth.token.permissions != null
+             && request.auth.token.permissions.hasAny([permissionName]);
+    }
+
+    // =========================================================================
+    // القواعد الأساسية (Core Rules)
+    // =========================================================================
+
+    // 1. منع الوصول لأي مجموعة جذرية غير معروفة
+    match /{collection}/{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. قاعدة Fallback العامة: كل البيانات تحت مجموعة البريد الإلكتروني للمؤسسة
+    // هذه القاعدة تعمل فقط إذا لم تطبق أي من القواعد الأكثر تحديداً
+    //
+    // ملاحظة للمبرمجين المستقبليين (2026-10-15): قسم الصيانة
+    // (maintenance/maintenance و maintenance/equipment و
+    // maintenance/logs) ليس له قواعد مخصصة — يمر عبر هذه القاعدة
+    // العامة: مالك المؤسسة فقط، بلا تحقق على مستوى الحقول (بخلاف
+    // الفواتير مثلاً). الذرية مضمونة في التطبيق عبر
+    // runTransaction (كل جلسات القراءة قبل الكتابة، والسجل داخل
+    // نفس المعاملة). لو أُضيف تحقق حقول للصيانة لاحقاً فقواعد
+    // create/update يجب أن تُدرج قبل هذه القاعدة العامة، وإلا
+    // فلن تُطبَّق أبداً.
+    match /{organizationEmail}/{document=**} {
+      // التحقق من أن اسم المجموعة هو بريد إلكتروني صالح
+      function isValidOrganizationEmail() {
+        return isValidEmail(organizationEmail);
+      }
+      
+      // السماح بالقراءة والكتابة فقط إذا كان المستخدم مسجلاً للدخول
+      // والبريد الإلكتروني للمجموعة يطابق بريد المستخدم
+      allow read, write: if isValidOrganizationEmail() && isOwner(organizationEmail);
+    }
+
+// =========================================================================
+// قواعد التحقق من صحة البيانات (Data Validation Rules)
+// =========================================================================
+
+// ⚠️ ⚠️ ⚠️ ملخص التحقق الذري والقواعد المُصلحة (تم التحقق في: 2026-10-12):
+// =========================================================================
+//
+// ✅ تم التحقق من أن عمليات الكتابة متعددة المستندات في
+//    قسم المستخدمين تستخدم firestore.runTransaction() مع
+//    snapshot isolation، أو دفعات WriteBatch ذرية (كل دفعة
+//    ذرية بمفردها) حيث لا تسمح Firestore بمعاملات على
+//    استعلامات (deleteRole/clearUserLogs).
+//
+// ✅ تم إصلاح قواعد Firestore يدوياً:
+//
+// 1. قاعدة التحديث (update) - مُصلحة:
+//    - تم السماح بجميع الحقول التي يُحدّثها التطبيق:
+//      name, email, phoneNumber, department, jobTitle,
+//      roleIds, accessCode, customPermissions, notificationEnabled, oneSignalPlayerId
+//      updatedAt, isActive
+//    - ⚠️ ⚠️ ⚠️ إصلاح حرجة: تم إضافة updatedAt و isActive
+//      لأن toggleUserStatus و updateUserNotificationSettings
+//      يُحدّثان هذه الحقول وكانت مفقودة من hasOnly
+//      مما كان يسبب رفض جميع عمليات التحديث
+//    - ⚠️ ⚠️ ⚠️ إصلاح حرجة: تم تغيير شرط name ليكون اختيارياً
+//      لأن toggleUserStatus لا يُحدّث الاسم
+//      وكان الشرط السابق يتطلب وجود name في كل تحديث
+//    - القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+//      باستخدام firestore.runTransaction() مع snapshot isolation.
+//
+// 2. قاعدة الإنشاء (create) - مُصلحة:
+//    - تم جعل email اختيارياً (يسمح بـ null عندما useCurrentUser=true)
+//    - عندما يكون email=null، يتم إنشاء المستخدم باستخدام المستخدم الحالي
+//    - القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+//      باستخدام firestore.runTransaction() مع snapshot isolation.
+//
+// 3. القاعدة الذهبية للذرّية:
+//    - أي عملية Read-Modify-Write MUST BE ATOMIC
+//    - باستخدام firestore.runTransaction() مع snapshot isolation
+//    - لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف
+//    - التعديلات اليدوية فقط لضمان سلامة الذرّية
+//
+// =========================================================================
+
+// 1. المستخدمين (Users)
+match /{organizationEmail}/users/users/{userId} {
+   // ⚠️ ⚠️ ⚠️ ملاحظة الذرّية الحرجة في قاعدة إنشاء المستخدمين ⚠️ ⚠️ ⚠️
+   // قاعدة الإنشاء تسمح بـ email=null لأن createUser يسمح بـ email=null
+   // عندما useCurrentUser=true. عندما يكون email=null، يتم إنشاء المستخدم
+   // باستخدام المستخدم الحالي.
+   //
+   // ⚠️ لماذا يجب أن تكون عملية الإنشاء ذرية بدقة فائقة؟
+    // - إنشاء المستخدم دون تسجيل في قيد البريد (unique_constraints) → تكرار البريد الإلكتروني
+   // - إنشاء سجل نشاط دون إنشاء المستخدم → فقدان بيانات
+   // - مستخدمان ينشئون مستخدمين في نفس الوقت بنفس البريد → تضارب البيانات
+   // - إنشاء دور تلقائياً دون إنشاء المستخدم → بيانات غير متسقة
+   // الحل: firestore.runTransaction() مع snapshot isolation في المستودع
+   // القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+   // باستخدام firestore.runTransaction() مع snapshot isolation.
+   // ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف ⚠️ ⚠️ ⚠️
+   allow create: if isOwner(organizationEmail)
+                 && isNonEmptyString(request.resource.data.name)
+                 && (request.resource.data.email is string
+                     ? (isValidEmail(request.resource.data.email)
+                        && isNonEmptyString(request.resource.data.email))
+                     : true)
+                 && request.resource.data.roleIds is list;
+// ⚠️ ⚠️ ⚠️ ملاحظة الذرّية الحرجة في قاعدة تحديث المستخدمين ⚠️ ⚠️ ⚠️
+    // قاعدة التحديث تسمح بجميع الحقول التي يُحدّثها التطبيق:
+    // name, email, phoneNumber, department, jobTitle,
+    // roleIds, accessCode, customPermissions, notificationEnabled, oneSignalPlayerId
+    // updatedAt, isActive
+    //
+    // ⚠️ ⚠️ ⚠️ لماذا يجب أن تكون عملية التحديث ذرية بدقة فائقة؟ ⚠️ ⚠️ ⚠️
+     // - تحديث البريد الإلكتروني دون تحديث قيد البريد (unique_constraints) → تضارب بيانات
+    // - تحديث الأدوار دون تحديث الصلاحيات → بيانات غير متسقة
+    // - مستخدمان يحدّثان نفس المستخدم في نفس الوقت → تعديلات غير صحيحة
+    // - تحديث isActive دون ذرّية → فقدان التغييرات عند التحديث المتزامن
+    // - تحديث updatedAt دون ذرّية → ترتيب خاطئ للتحديثات
+    // الحل: firestore.runTransaction() مع snapshot isolation في المستودع
+    // القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+    // باستخدام firestore.runTransaction() مع snapshot isolation.
+    // ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف ⚠️ ⚠️ ⚠️
+    // ⚠️ ⚠️ ⚠️ ملاحظة: name اختياري في التحديث لأن toggleUserStatus
+    //    لا يُحدّث الاسم. إذا كان name موجوداً، يجب أن يكون غير فارغ.
+    //    هذا يمنع رفض تحديثات الحالة والإشعارات بسبب عدم وجود name.
+    // ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف ⚠️ ⚠️ ⚠️
+     allow update: if isOwner(organizationEmail)
+                   && (request.resource.data.name is string
+                       ? isNonEmptyString(request.resource.data.name)
+                       : true)
+                   && request.resource.data.keys().hasOnly(['name', 'email', 'phoneNumber',
+                       'department', 'jobTitle', 'roleIds', 'accessCode',
+                       'customPermissions', 'notificationEnabled', 'oneSignalPlayerId',
+                       'oneSignalPlayerIds', 'updatedAt', 'isActive']);
+  // السماح بالقراءة لأي مستخدم مسجل دخول في نفس المؤسسة
+  // لاسترجاع أسماء المستخدمين وتوكنات الإشعارات
+  // ⚠️ ملاحظة: القراءة مسموح بها لأي مستخدم مسجل دخول في نفس المؤسسة
+  // هذا مقصود لاسترجاع أسماء المستخدمين وتوكنات الإشعارات
+  // لكن يجب التأكد من أن البيانات الحساسة لا تُكشف
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+   allow delete: if isOwner(organizationEmail)
+                && hasPermission('users_delete');
+    // ⚠️ ⚠️ ⚠️ ملاحظة الذرّية في قاعدة حذف المستخدمين ⚠️ ⚠️ ⚠️
+    // عند حذف مستخدم، يتم حذف:
+    // - مستند المستخدم
+    // - قيد البريد الإلكتروني (unique_constraints)
+    // - سجلات النشاط المرتبطة (أول 450 داخل المعاملة
+    //   والباقي في دفعات ذرية منفصلة بعد نجاحها)
+    // - سجل نشاط الحذف نفسه
+    // كل هذا يتم داخل firestore.runTransaction() واحد مع
+    // snapshot isolation (مع دفعات للفائض - انظر الملاحظة
+    // الشاملة في users_repository_impl.dart).
+    // بدون الذرّية: قد يُحذف المستخدم دون حذف سجلات النشاط → سجلات أيتيمة
+    // أو يُحذف المستخدم دون إزالة قيد البريد (unique_constraints) → تكرار البريد الإلكتروني
+   // القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+   // باستخدام firestore.runTransaction() مع snapshot isolation.
+   // ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف ⚠️ ⚠️ ⚠️
+ }
+
+ // 2. الأدوار والصلاحيات (Roles & Permissions)
+match /{organizationEmail}/users/roles/{roleId} {
+   // ⚠️ ⚠️ ⚠️ ملاحظة الذرّية الحرجة في قواعد الأدوار ⚠️ ⚠️ ⚠️
+   // عند حذف دور، يتم حذف المستخدمين الذين لديهم هذا الدور كدور وحيد فقط.
+   // هذا لأن المستخدم بدون دور لا معنى لوجوده في النظام.
+   // القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+   // باستخدام firestore.runTransaction() مع snapshot isolation.
+   // ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف ⚠️ ⚠️ ⚠️
+   allow create: if isOwner(organizationEmail)
+                && isNonEmptyString(request.resource.data.name)
+                && isNonEmptyString(request.resource.data.displayName)
+                && request.resource.data.permissions is list;
+   allow update: if isOwner(organizationEmail)
+                && isNonEmptyString(request.resource.data.displayName)
+                && request.resource.data.permissions is list;
+   allow read: if isOwner(organizationEmail);
+   allow delete: if isOwner(organizationEmail)
+                && hasPermission('roles_delete');
+ }
+
+// =========================================================================
+// قواعد حماية الفواتير (Invoice Rules)
+// =========================================================================
+// هذه القواعد تضمن أن عمليات الفواتير تكون ذرية وآمنة
+// بدون هذه القواعد، يمكن لأي مستخدم تعديل الفواتير مباشرة
+// مما يُتجاوز الذرّية على مستوى التطبيق بالكامل.
+// =========================================================================
+
+// 3. الفواتير (Invoices)
+match /{organizationEmail}/invoices/invoices/{invoiceId} {
+  // قراءة الفاتورة: فقط للمالك أو المستخدمين المصرح لهم
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء فاتورة جديدة: فقط للمالك مع صلاحية إضافة فواتير
+  allow create: if isOwner(organizationEmail)
+               && hasPermission('invoices_sales_manage')
+               && isNonEmptyString(request.resource.data.invoiceNumber)
+               && request.resource.data.totalAmount is number
+               && request.resource.data.type is string;
+
+  // تحديث فاتورة: فقط للمالك مع صلاحية تعديل فواتير
+  // مع التحقق من أن المستخدم لديه الصلاحية
+  allow update: if isOwner(organizationEmail)
+               && hasPermission('invoices_sales_manage')
+               && request.resource.data.id is string
+               && request.resource.data.invoiceNumber is string;
+
+  // حذف فاتورة: فقط للمالك مع صلاحية حذف فواتير
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('invoices_delete');
+}
+
+// 4. سجلات الفواتير (Invoice Logs)
+match /{organizationEmail}/invoices/logs/{logId} {
+  // قراءة السجلات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء سجل: فقط للمالك
+  allow create: if isOwner(organizationEmail)
+               && request.resource.data.actionType is string
+               && request.resource.data.timestamp is timestamp;
+
+  // تحديث سجل: فقط للمالك
+  allow update: if isOwner(organizationEmail);
+
+  // حذف سجل: فقط للمالك مع صلاحية حذف سجلات
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('logs_delete');
+}
+
+// 5. إحصائيات الفواتير (Invoice Stats)
+match /{organizationEmail}/invoices/stats/{statsId} {
+  // قراءة الإحصائيات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // تحديث الإحصائيات: فقط للمالك
+  allow update: if isOwner(organizationEmail);
+
+  // إنشاء الإحصائيات: فقط للمالك
+  allow create: if isOwner(organizationEmail);
+
+  // حذف الإحصائيات: فقط للمالك مع صلاحية
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('stats_delete');
+}
+
+// 5-bis. المصاريف (Expenses)
+// ⚠️ ملاحظة ذرية للمبرمجين المستقبليين (تم التحقق: 2026-10-12):
+// كل عملية تعدّل أكثر من مستند (المصروف + الصندوق + سجل النشاط)
+// يجب أن تكون داخل firestore.runTransaction() واحد (all-or-nothing)
+// — نمط الفواتير. لا تنقل جزءاً منها إلى BLoC أو UseCase أو
+// خدمة خارجية. الصندوق يُحدَّث بـ FieldValue.increment() داخل
+// المعاملة (ذري على الخادم ويمنع Read-Modify-Write)، وسجل
+// النشاط يُكتب داخل نفس المعاملة بلا شرط فلا يبقى مصروف
+// دون سجل تدقيق أو العكس.
+// ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.
+match /{organizationEmail}/expenses/expenses/{expenseId} {
+  // قراءة المصروف: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء مصروف: المالك مع صلاحية إضافة مصروف
+  allow create: if isOwner(organizationEmail)
+               && hasPermission('expenses_create')
+               && isNonEmptyString(request.resource.data.title)
+               && request.resource.data.amount is number
+               && request.resource.data.category is string;
+
+  // تحديث مصروف: المالك مع صلاحية تعديل مصروف
+  allow update: if isOwner(organizationEmail)
+               && hasPermission('expenses_edit');
+
+  // حذف مصروف: المالك مع صلاحية حذف مصروف
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('expenses_delete');
+}
+
+// 5-ter. سجلات المصاريف (Expense Logs)
+// ⚠️ ملاحظة ذرية: سجل النشاط يُنشأ داخل نفس معاملة العملية
+// المالية (نمط الفواتير) — ذري معها، فلا يُكتب من BLoC خارج
+// المعاملة وإلا انفصل عن العملية المالية.
+match /{organizationEmail}/expenses/logs/{logId} {
+  // قراءة السجلات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء سجل: المالك — يُكتب داخل المعاملة نفسها
+  allow create: if isOwner(organizationEmail)
+               && request.resource.data.actionType is string
+               && request.resource.data.timestamp is timestamp;
+
+  // تحديث سجل: فقط للمالك
+  allow update: if isOwner(organizationEmail);
+
+  // حذف سجل: المالك مع صلاحية حذف مصروف
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('expenses_delete');
+}
+
+// =========================================================================
+// قواعد حماية العملاء (Customer Rules)
+// =========================================================================
+
+// 6. العملاء (Customers)
+match /{organizationEmail}/customers/customers/{customerId} {
+  // قراءة العميل: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء عميل: فقط للمالك مع صلاحية عملاء
+  allow create: if isOwner(organizationEmail)
+               && hasPermission('customers_manage')
+               && isNonEmptyString(request.resource.data.name)
+               && isNonEmptyString(request.resource.data.email);
+
+  // تحديث عميل: فقط للمالك مع صلاحية عملاء
+  allow update: if isOwner(organizationEmail)
+               && hasPermission('customers_manage')
+               && isNonEmptyString(request.resource.data.name);
+
+  // حذف عميل: فقط للمالك مع صلاحية حذف عملاء
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('customers_delete');
+}
+
+// =========================================================================
+// قواعد حماية الصندوق (Cashbox Rules)
+// =========================================================================
+
+// 7. الصندوق (Cashbox)
+match /{organizationEmail}/cashbox/balance/{balanceId} {
+  // قراءة الصندوق: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // تحديث الصندوق: فقط للمالك مع صلاحية صندوق
+  // الصندوق يتغير فقط عبر Transactions في التطبيق
+  allow update: if isOwner(organizationEmail)
+               && hasPermission('cashbox_manage')
+               && request.resource.data.currentBalance is number;
+
+  // إنشاء سجل صندوق: فقط للمالك
+  allow create: if isOwner(organizationEmail)
+               && hasPermission('cashbox_manage');
+
+  // حذف سجل صندوق: فقط للمالك مع صلاحية
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('cashbox_delete');
+}
+
+// =========================================================================
+// 7.5 التقارير (Reports) — أُضيفت 2026-10-15
+// =========================================================================
+
+// ⚠️ ملاحظة جوهرية للمبرمجين المستقبليين: مسارات التقارير
+// ({org}/reports/reports و {org}/reports/logs) لم تكن تملك أي قاعدة
+// مخصّصة وكانت تقع على قاعدة الـ Fallback العامة أعلاه
+// (allow read, write: if isOwner) ⇒ أي مستخدم موثّق صاحب المؤسسة
+// يقرأ ويكتب ويحذف التقارير بغض النظر عن صلاحيات reports_* — أي أن
+// التحقق كان في الواجهة فقط (نفس فجوة تنفيذ قواعد بقية الأقسام).
+//
+// ⚠️ لماذا لا تعدّل الـ Fallback لتقييدها؟ : قواعد Firestore تُجمع
+// بـ OR (تكفي قاعدة واحدة تسمح)؛ الـ Fallback تغطّي كل الأقسام
+// وتغييرها يُطبّق عليها كلها بقرار واحد — قرار معماري يخص النظام
+// كله لا القسم الواحد، وكان سيُعطّل الكتابات لأن صلاحيات
+// request.auth.token.permissions لا تُضبَط في هذا المشروع حالياً
+// (لا يوجد setCustomUserClaims) فترجع hasPermission=false.
+// القواعد أدناه هي الطبقة المُعبِرة عن النيّة والجاهزة للتفعيل
+// متى ما ضُبِطت الـ claims على مستوى النظام.
+
+// 7.5.1 التقارير
+match /{organizationEmail}/reports/reports/{reportId} {
+  // قراءة التقرير: للمالك بصلاحية مشاهدة تقارير
+  allow read: if isAuthenticated() && isOwner(organizationEmail)
+               && hasPermission('reports_view');
+
+  // إنشاء تقرير: للمالك بصلاحية إنشاء
+  allow create: if isOwner(organizationEmail)
+                 && hasPermission('reports_create');
+
+  // تحديث تقرير: للمالك بصلاحية تعديل
+  allow update: if isOwner(organizationEmail)
+                 && hasPermission('reports_edit');
+
+  // حذف تقرير: للمالك بصلاحية حذف
+  // ⚠️ السجلات (reports/logs) لا تُحذف مع التقرير — مقصود: السجل
+  // يبقى دليلاً تاريخياً (انظر deleteReport في المستودع)
+  allow delete: if isOwner(organizationEmail)
+                 && hasPermission('reports_delete');
+}
+
+// 7.5.2 سجل التقارير (للقراءة فقط في القسم — يُكتب ضمن العمليات)
+match /{organizationEmail}/reports/logs/{logId} {
+  allow read: if isAuthenticated() && isOwner(organizationEmail)
+               && hasPermission('reports_view');
+
+  // الإنشاء من العمليات المالية ذاتها (addReportLog داخل المعاملات
+  // والدفعات)؛ لا تعديل ولا حذف من التطبيق
+  allow create: if isOwner(organizationEmail)
+                 && hasPermission('reports_view');
+}
+
+// =========================================================================
+// قواعد حماية المخزون (Inventory Rules)
+// =========================================================================
+
+// 8. المخزون (Inventory)
+match /{organizationEmail}/inventory/products/{productId} {
+  // قراءة المنتج: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء/تحديث منتج: فقط للمالك مع صلاحية مخزون
+  allow create, update: if isOwner(organizationEmail)
+                       && hasPermission('inventory_manage')
+                       && request.resource.data.name is string
+                       && request.resource.data.quantity is number;
+
+  // حذف منتج: فقط للمالك مع صلاحية حذف مخزون
+  allow delete: if isOwner(organizationEmail)
+               && hasPermission('inventory_delete');
+}
+
+// 9. سجل المنتجات (Product Logs)
+match /{organizationEmail}/inventory/products_logs/{logId} {
+  // قراءة سجل المنتجات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء سجل: فقط للمالك
+  allow create: if isOwner(organizationEmail)
+               && hasPermission('inventory_manage');
+
+  // تحديث وحذف: فقط للمالك مع صلاحية
+  allow update, delete: if isOwner(organizationEmail)
+                       && hasPermission('inventory_manage');
+}
+
+// 10. الفئات (Categories)
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║ ⚠️  ملاحظة للمبرمجين المستقبليين:                              ║
+// ║ هذه القاعدة محمية بنفس صلاحيات products/logs.                  ║
+// ║ لا تترك هذه المجموعة بدون قواعد حماية.                         ║
+// ║ ⚠️  لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+match /{organizationEmail}/inventory/categories/{categoryId} {
+  // قراءة الفئات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء/تحديث/حذف الفئات: فقط للمالك مع صلاحية مخزون
+  allow write: if isOwner(organizationEmail)
+              && hasPermission('inventory_manage');
+}
+
+// 10-bis. فهرس أسماء الفئات (Category Name Index)
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║ ⚠️  ملاحظة للمبرمجين المستقبليين:                              ║
+// ║ هذه المجموعة تُستخدم لمنع تكرار أسماء الفئات بشكل ذري.        ║
+// ║ معرف المستند هو اسم الفئة مُطبع lowercase.                    ║
+// ║ لا تعدل هذه القاعدة يدوياً إلا إذا فهمت تأثيرها على الذرّية.  ║
+// ║ ⚠️  لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+match /{organizationEmail}/inventory/category_name_index/{indexId} {
+  // القراءة مسموح بها داخل المعاملة فقط من قبل المالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // الكتابة مسموح بها فقط من قبل المالك مع صلاحية مخزون
+  // التطبيق يضمن أن هذه الكتابات تتم داخل runTransaction() فقط
+  allow write: if isOwner(organizationEmail)
+              && hasPermission('inventory_manage');
+}
+
+// 11. الأرفف (Shelves)
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║ ⚠️  ملاحظة للمبرمجين المستقبليين:                              ║
+// ║ هذه القاعدة محمية بنفس صلاحيات products/logs.                  ║
+// ║ لا تترك هذه المجموعة بدون قواعد حماية.                         ║
+// ║ ⚠️  لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+match /{organizationEmail}/inventory/shelves/{shelfId} {
+  // قراءة الأرفف: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء/تحديث/حذف الأرفف: فقط للمالك مع صلاحية مخزون
+  allow write: if isOwner(organizationEmail)
+              && hasPermission('inventory_manage');
+}
+
+// 12. سجلات المخزون (Inventory Logs)
+// ╔══════════════════════════════════════════════════════════════════╗
+// ║ ⚠️  ملاحظة للمبرمجين المستقبليين:                              ║
+// ║ هذه القاعدة محمية بنفس صلاحيات products_logs.                  ║
+// ║ لا تترك هذه المجموعة بدون قواعد حماية.                         ║
+// ║ ⚠️  لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.              ║
+// ╚══════════════════════════════════════════════════════════════════╝
+match /{organizationEmail}/inventory/logs/{logId} {
+  // قراءة السجلات: فقط للمالك
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+
+  // إنشاء سجل: فقط للمالك مع صلاحية مخزون
+  allow create: if isOwner(organizationEmail)
+              && hasPermission('inventory_manage');
+
+  // تحديث وحذف السجلات: فقط للمالك مع صلاحية مخزون
+  allow update, delete: if isOwner(organizationEmail)
+              && hasPermission('inventory_manage');
+}
+
+// =========================================================================
+// قواعد حماية الصلاحيات (Permissions Rules)
+// =========================================================================
+
+// 10. الصلاحيات (Permissions)
+match /{organizationEmail}/permissions/{permissionId} {
+  allow read: if isAuthenticated() && isOwner(organizationEmail);
+  allow write: if isOwner(organizationEmail)
+              && hasPermission('permissions_manage');
+}
+
+// =========================================================================
+// ⚠️ ⚠️ ⚠️ ملخص قواعد الذرّية ⚠️ ⚠️ ⚠️
+// =========================================================================
+// جميع المجموعات الحرجة محمية الآن بقواعد تحقق:
+// - invoices: الفواتير محمية بصلاحيات محددة
+// - expenses: المصاريف محمية بصلاحيات محددة
+// - expenses/logs: سجلات المصاريف محمية بصلاحيات محددة
+// - customers: العملاء محميين بصلاحيات محددة
+// - cashbox: الصندوق محمي بصلاحيات محددة
+// - inventory/products: المنتجات محمية بصلاحيات محددة
+// - inventory/products_logs: سجل المنتجات محمي بصلاحيات محددة
+// - inventory/categories: محمية بصلاحيات محددة
+// - inventory/shelves: الأرفف محمية بصلاحيات محددة
+// - inventory/logs: سجلات المخزون محمية بصلاحيات محددة
+// ⚠️ ملاحظة للمبرمجين المستقبليين (تحقق 2026-10-15):
+// مجموعات التأجير (rentals/rentals, rentals/rental_units,
+// rentals/logs) بلا قواعد خاصة — تسقط تحت القاعدة العامة
+// للملكية (البريد) أعلاه فقط: لا فحص hasPermission
+// ('rentals_delete') ولا تحقق من الحقول على الخادم،
+// بخلاف الفواتير/العملاء/المخزون. البوابة الفعلية حالياً
+// في العميل (PermissionChecker) حسب ملاحظة custom claims
+// أدناه — يلزم توحيد القواعد قبل الاعتماد على فحوصات
+// الخادم.
+// - stats: الإحصائيات محمية بصلاحيات محددة
+// - users: المستخدمين محميين بقواعد تحقق
+//
+// هذه القواعد تضمن أن:
+// 1. فقط المستخدمين المصرح لهم يمكنهم تعديل البيانات
+// 2. البيانات المُدخلة تتوافق مع الأنواع المطلوبة
+// 3. الذرّية على مستوى التطبيق مدعومة بقواعد البيانات
+//
+// ⚠️ ملاحظة حرجة (تم التحقق: 2026-10-12): التطبيق لا يعيّن
+// صلاحيات المستخدم في رمز المصادقة (لا يوجد setCustomUserClaims)
+// — لذا request.auth.token.permissions فارغ وفحوصات hasPermission
+// في هذه القواعد رمزية حالياً، والبوابة الفعلية هي قاعدة الملكية
+// العامة أعلى الملف. التحكم بالصلاحيات من جهة العميل عبر
+// PermissionChecker (يقرأ من Firestore). لتفعيل hasPermission هنا
+// فعلياً: عيّن custom claims عبر Firebase Admin SDK (Cloud Function)
+// ثم شدّد القاعدة العامة — لا تعتمد على هذه الفحوصات قبل ذلك.
+//
+// ⚠️ ⚠️ ⚠️ ملاحظة حرجة: تم إضافة حماية لجميع مجموعات المخزن
+// categories/shelves/logs. لا تترك أي مجموعة بدون قواعد حماية.
+// ⚠️ ⚠️ ⚠️
+//
+// ✅ تم التحقق من أن عمليات الكتابة متعددة المستندات في
+//    قسم المستخدمين تستخدم firestore.runTransaction() مع
+//    snapshot isolation أو دفعات WriteBatch ذرية.
+//
+// ✅ تم التحقق من أن جميع عمليات القراءة فقط مُعلّمة بشكل صحيح
+//    بأنها لا تحتاج إلى ذرّية.
+//
+// ✅ تم التحقق من أن سجلات النشاط (logs) تُضاف داخل المعاملة
+//    الذرّية لعمليات المستخدمين الناجحة (createUser/
+//    updateUser/deleteUser/toggleUserStatus). ⚠️ الأدوار
+//    (createRole/updateRole/deleteRole) لا تُسجل نشاطاً في
+//    الكود الحالي - لا تضف لها سجلات إلا بعد مراجعة لأن
+//    ذلك يغير سلوك التدقيق.
+//
+// ✅ تم إصلاح قواعد Firestore يدوياً:
+//
+// 1. قاعدة التحديث (update) - مُصلحة:
+//    - تم السماح بجميع الحقول التي يُحدّثها التطبيق:
+//      name, email, phoneNumber, department, jobTitle,
+//      roleIds, accessCode, customPermissions, notificationEnabled, oneSignalPlayerId
+//      updatedAt, isActive
+//    - ⚠️ ⚠️ ⚠️ إصلاح حرجة: تم إضافة updatedAt و isActive
+//      لأن toggleUserStatus و updateUserNotificationSettings
+//      يُحدّثان هذه الحقول وكانت مفقودة من hasOnly
+//      مما كان يسبب رفض جميع عمليات التحديث
+//    - ⚠️ ⚠️ ⚠️ إصلاح حرجة: تم تغيير شرط name ليكون اختيارياً
+//      لأن toggleUserStatus لا يُحدّث الاسم
+//      وكان الشرط السابق يتطلب وجود name في كل تحديث
+//    - القاعدة الذهبية: أي عملية Read-Modify-Write MUST BE ATOMIC
+//      باستخدام firestore.runTransaction() مع snapshot isolation.
+//
+// 2. قاعدة الإنشاء (create) - مُصلحة:
+//    - تم جعل email اختيارياً (يسمح بـ null عندما useCurrentUser=true)
+//    - بدون هذا التحديث، سيُرفض إنشاء مستخدم باستخدام المستخدم الحالي
+//
+// ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.
+// التعديلات اليدوية فقط لضمان سلامة الذرّية.
+// ⚠️ ⚠️ ⚠️
+// =========================================================================
+//
+// ✅ التحقق النهائي من الذرّية بدقة فائقة (تم التحقق في: 2026-10-12):
+//
+// ⚠️ ملاحظة للمبرمجين المستقبليين: هذا الملخص يصف ما يفعله
+// الكود الفعلي في users_repository_impl.dart بدقة. لا توثّق
+// عمليات غير موجودة في الكود (مثل سجلات نشاط للأدوار) لأن
+// ذلك يُضلل من يعدّل لاحقاً. مجموعة قيود البريد الفعلية
+// هي unique_constraints (ليست email_tracker).
+//
+// 1. createUser: ✅ ذرية (Transaction واحدة على مرحلتين)
+//    - المرحلة 1 (كل القراءات قبل أي كتابة): قراءة الأدوار
+//      + فحص وجود المستخدم + فحص فريدية البريد
+//      (unique_constraints)
+//    - المرحلة 2 (كل الكتابات): إنشاء الأدوار غير الموجودة
+//      + مستند المستخدم + قيد البريد (unique_constraints) +
+//      سجل النشاط
+//    - ⚠️ إنشاء Firebase Auth أولاً (خارج المعاملة)، ويُحذف
+//      حسابه إذا فشلت المعاملة (قيد Firebase - الحل الأمثل:
+//      Cloud Function)
+//
+// 2. updateUser: ✅ ذرية (Transaction واحدة)
+//    - التحقق من وجود المستخدم داخل المعاملة
+//    - التحقق من تعارض البريد الإلكتروني داخل المعاملة
+//    - تحديث بيانات المستخدم داخل المعاملة
+//    - تحديث قيد البريد (unique_constraints) إذا تغير داخل
+//      المعاملة
+//    - إضافة سجل النشاط داخل المعاملة
+//    - ⚠️ لا يُزامن Firebase Auth (بريد/اسم تسجيل الدخول
+//      يبقيان كما هما - مستودعات منفصلة)
+//
+// 3. deleteUser: ✅ ذرية (Transaction واحدة + دفعات للفائض)
+//    - التحقق من وجود المستخدم داخل المعاملة
+//    - حذف مستند المستخدم داخل المعاملة
+//    - حذف قيد البريد (unique_constraints) داخل المعاملة
+//    - حذف أول 450 سجل نشاط داخل المعاملة (حد Firestore
+//      500 عملية مع هامش أمان _maxBatchWrites = 450)
+//    - إضافة سجل نشاط الحذف داخل المعاملة
+//    - حذف السجلات المتبقية في دفعات ذرية منفصلة بعد نجاح
+//      المعاملة (الدفعات ليست ذرية مع بعضها)
+//    - ⚠️ لا يحذف المستخدم من Firebase Auth (الحل الموصى
+//      به: Cloud Function)
+//    - ⚠️ سجلات النشاط تُقرأ بـ query.get() قبل المعاملة
+//      (Firestore لا تسمح بـ queries داخل transactions)
+//
+// 4. toggleUserStatus: ✅ ذرية (Transaction واحدة)
+//    - التحقق من وجود المستخدم داخل المعاملة
+//    - تحديث حالة المستخدم داخل المعاملة
+//    - إضافة سجل النشاط داخل المعاملة
+//
+// 5. updateUserNotificationSettings: ✅ ذرية (Transaction واحدة)
+//    - التحقق من وجود المستخدم داخل المعاملة
+//    - تحديث إعدادات الإشعارات داخل المعاملة
+//
+// 6. createRole: ✅ ذرية (Transaction واحدة)
+//    - التحقق من عدم وجود الدور مسبقاً داخل المعاملة
+//    - إنشاء الدور داخل المعاملة
+//    - ⚠️ لا يُسجل نشاط إنشاء في الكود الحالي (لا تضف
+//      سجلاً إلا بعد مراجعة لأن ذلك يغير سلوك التدقيق)
+//
+// 7. updateRole: ✅ ذرية (Transaction واحدة)
+//    - التحقق من وجود الدور داخل المعاملة
+//    - تحديث الدور داخل المعاملة
+//    - ⚠️ لا يُسجل نشاط تحديث في الكود الحالي (لا تضف
+//      سجلاً إلا بعد مراجعة لأن ذلك يغير سلوك التدقيق)
+//
+// 8. deleteRole: ✅ ذرية مع limitation (دفعات WriteBatch)
+//    - ⚠️ البحث عن المستخدمين وسجلاتهم خارج الدفعات
+//      (Firestore لا تسمح بـ queries داخل transactions)
+//    - حذف المستخدمين الذين لديهم هذا الدور كدور وحيد فقط
+//      (إعادة التحقق roleIds.length == 1) + قيود بريدهم +
+//      سجلات نشاطهم + الدور في دفعات ذرية (كل دفعة ذرية
+//      بمفردها، والدفعات ليست ذرية مع بعضها)
+//    - ⚠️ لا يُسجل نشاط حذف في الكود الحالي، وقد لا يُحذف
+//      مستخدم حصل على الدور بعد البحث (الحل الأمثل:
+//      Cloud Function)
+//
+// 9. saveUsersSettings: ✅ ذرية طبيعياً (كتابة واحدة بـ
+//    set مع merge: true - لا تحتاج Transaction)
+//
+// 10. clearUserLogs: ✅ ذرية مع limitation (Query + دفعات)
+//    - ⚠️ Firestore لا تسمح بمعاملات على استعلامات، لذا
+//      Query + دفعات WriteBatch (كل دفعة ذرية بمفردها،
+//      والدفعات ليست ذرية مع بعضها)
+//
+// 11. addUserLog: ✅ ذرية تلقائياً (كتابة واحدة add)
+// 12. deleteUserLog: ✅ ذرية (Transaction واحدة: فحص الوجود
+//     + الحذف)
+//
+// ⚠️ ⚠️ ⚠️ لماذا الذرّية بدقة فائقة مطلوبة؟ ⚠️ ⚠️ ⚠️
+//
+// بدون ذرّية بدقة فائقة:
+// - مشكلة التحديث المفقود (Lost Update): مستخدمان يعدّلان نفس المستخدم
+//   في نفس الوقت → تعديل واحد يُفقد
+// - تضارب البيانات (Data Conflict): إنشاء مستخدمين بنفس البريد
+//   في نفس الوقت → تضارب البيانات
+// - البيانات الأيتيمة (Orphaned Data): إنشاء سجل نشاط دون إنشاء المستخدم
+//   → بيانات غير متسقة
+// - مشكلة التكرار (Duplicate Problem): إنشاء مستخدم دون تسجيل في
+//   قيد البريد (unique_constraints) → تكرار البريد الإلكتروني
+//
+// الحل: جميع العمليات المرتبطة داخل firestore.runTransaction() واحد
+// مع snapshot isolation لضمان الذرّية بدقة فائقة.
+//
+// ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.
+// التعديلات اليدوية فقط لضمان سلامة الذرّية.
+// ⚠️ ⚠️ ⚠️
+// =========================================================================
+//
+// ✅ التحقق النهائي من الذرّية في قسم المخزون (تم التحقق في: 2026-09-30):
+//
+// تم التحقق من أن جميع العمليات التالية في قسم المخزون
+// تستخدم firestore.runTransaction() مع snapshot isolation:
+//
+// 1. createCategory: ✅ ذرية بدقة فائقة
+//    - التحقق من عدم وجود الفئة مسبقاً داخل المعاملة
+//    - التحقق من عدم تكرار اسم الفئة داخل المعاملة باستخدام
+//      مجموعة منفصلة `category_name_index` و transaction.get()
+//    - إنشاء الفئة داخل المعاملة
+//    - إنشاء سجل الفهرس داخل المعاملة
+//    - بهذا نضمن إما نجاح الإنشاء أو فشله معاً
+//
+// 2. updateCategory: ✅ ذرية بدقة فائقة
+//    - التحقق من وجود الفئة داخل المعاملة
+//    - التحقق من عدم تكرار الاسم الجديد داخل المعاملة
+//    - تحديث الفئة داخل المعاملة
+//    - تحديث فهرس الأسماء داخل المعاملة
+//    - بهذا نضمن إما نجاح التحديث أو فشله معاً
+//
+// 3. deleteCategory: ✅ ذرية بدقة فائقة
+//    - التحقق من وجود الفئة قبل الحذف
+//    - حذف الفئة داخل المعاملة
+//    - حذف فهرس الاسم داخل المعاملة
+//    - بهذا نضمن إما نجاح الحذف أو فشله معاً
+//
+// 4. createProduct: ✅ ذرية بدقة فائقة
+//    - التحقق من عدم وجود المنتج مسبقاً داخل المعاملة
+//    - إنشاء المنتج داخل المعاملة
+//
+// 5. updateProduct: ✅ ذرية بدقة فائقة
+//    - التحقق من وجود المنتج داخل المعاملة
+//    - تحديث المنتج داخل المعاملة
+//
+// 6. deleteProduct: ✅ ذرية بدقة فائقة
+//    - التحقق من وجود المنتج داخل المعاملة
+//    - التحقق من ملكية المنتج داخل المعاملة
+//    - حذف المنتج داخل المعاملة
+//
+// 7. updateProductQuantity: ✅ ذرية بدقة فائقة
+//    - جلب المنتج الحالي داخل المعاملة
+//    - تحديث الكمية داخل المعاملة
+//    - إنشاء سجل المخزون داخل المعاملة
+//    - بهذا نضمن إما نجاح كل العمليات أو فشلها معاً
+//
+// 8. updateProductPrices: ✅ ذرية بدقة فائقة
+//    - التحقق من وجود المنتج داخل المعاملة
+//    - تحديث الأسعار داخل المعاملة
+//
+// 9. createProductLog: ✅ ذرية بدقة فائقة
+//    - جلب بيانات المنتج داخل المعاملة
+//    - إنشاء سجل المنتج داخل المعاملة
+//
+// 10. addInventoryLog: ✅ ذرية بدقة فائقة
+//     - إنشاء سجل المخزون داخل المعاملة
+//
+// 11. deleteInventoryLog: ✅ ذرية بدقة فائقة
+//     - التحقق من وجود السجل داخل المعاملة
+//     - حذف السجل داخل المعاملة
+//
+// 12. clearInventoryLogs: ⚠️ WriteBatch + Query خارج
+//     - السبب: Firestore runTransaction لا تدعم تنفيذ استعلامات
+//     - الخطر: احتمال سباق بسيط في عمليات التنظيف
+//     - مقبول لعمليات التنظيف على سجلات قديمة
+//
+// ⚠️ ⚠️ ⚠️ لماذا الذرّية بدقة فائقة مطلوبة في المخزون؟ ⚠️ ⚠️ ⚠️
+//
+// بدون ذرّية بدقة فائقة:
+// - مشكلة التحديث المفقود (Lost Update): مستخدمان يعدّلان نفس المنتج
+//   في نفس الوقت → تعديل واحد يُفقد
+// - تضارب البيانات (Data Conflict): إنشاء فئتين بنفس الاسم
+//   في نفس الوقت → تضارب البيانات
+// - البيانات الأيتيمة (Orphaned Data): إنشاء سجل مخزون دون تحديث المنتج
+//   → بيانات غير متسقة
+// - مشكلة التكرار (Duplicate Problem): إنشاء فئة دون تسجيل في
+//   الفهرس → تكرار اسم الفئة
+//
+// الحل: جميع العمليات المرتبطة داخل firestore.runTransaction() واحد
+// مع snapshot isolation لضمان الذرّية بدقة فائقة.
+//
+// ⚠️ ⚠️ ⚠️ لا تستخدم سكربت أو أداة آلية لتعديل هذا الملف.
+// التعديلات اليدوية فقط لضمان سلامة الذرّية.
+// ⚠️ ⚠️ ⚠️
+// =========================================================================
+}
+}

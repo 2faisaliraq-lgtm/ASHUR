@@ -1,0 +1,1367 @@
+{
+  "rootFolder": "d:\\ashur",
+  "analyzedAt": "2026-10-14T12:21:48.146Z",
+  "rootStructure": [
+    {
+      "name": "$null",
+      "type": "file",
+      "size": 533,
+      "lines": 12
+    },
+    {
+      "name": ".gitignore",
+      "type": "file",
+      "size": 3920,
+      "lines": 235
+    },
+    {
+      "name": "analysis_options.yaml",
+      "type": "file",
+      "size": 917,
+      "lines": 36
+    },
+    {
+      "name": "android",
+      "type": "dir"
+    },
+    {
+      "name": "ashur.iml",
+      "type": "file",
+      "size": 859,
+      "lines": 18
+    },
+    {
+      "name": "assets",
+      "type": "dir"
+    },
+    {
+      "name": "build",
+      "type": "dir"
+    },
+    {
+      "name": "devtools_options.yaml",
+      "type": "file",
+      "size": 184,
+      "lines": 4
+    },
+    {
+      "name": "firebase.json",
+      "type": "file",
+      "size": 369,
+      "lines": 22
+    },
+    {
+      "name": "firestore.indexes.json",
+      "type": "file",
+      "size": 28183,
+      "lines": 1388
+    },
+    {
+      "name": "firestore.rules",
+      "type": "file",
+      "size": 45453,
+      "lines": 751
+    },
+    {
+      "name": "functions",
+      "type": "dir"
+    },
+    {
+      "name": "ios",
+      "type": "dir"
+    },
+    {
+      "name": "lib",
+      "type": "dir"
+    },
+    {
+      "name": "linux",
+      "type": "dir"
+    },
+    {
+      "name": "macos",
+      "type": "dir"
+    },
+    {
+      "name": "pubspec.lock",
+      "type": "file",
+      "size": 55160,
+      "lines": 1832
+    },
+    {
+      "name": "pubspec.yaml",
+      "type": "file",
+      "size": 5243,
+      "lines": 159
+    },
+    {
+      "name": "README.md",
+      "type": "file",
+      "size": 8913,
+      "lines": 232
+    },
+    {
+      "name": "test",
+      "type": "dir"
+    },
+    {
+      "name": "web",
+      "type": "dir"
+    },
+    {
+      "name": "windows",
+      "type": "dir"
+    }
+  ],
+  "rootFileSnippets": {
+    "$null": [
+      "Backup-BeforeEdit : The term 'Backup-BeforeEdit' is not recognized as the name",
+      "of a cmdlet, function, script file, or operable program. Check the spelling of",
+      "the name, or if a path was included, verify that the path is correct and try",
+      "again.",
+      "At line:1 char:1",
+      "+ Backup-BeforeEdit -Path 'd:\\ashur\\lib\\features\\invoices\\presentation\\ ...",
+      "+ ~~~~~~~~~~~~~~~~~",
+      "+ CategoryInfo          : ObjectNotFound: (Backup-BeforeEdit:String) [], C",
+      "ommandNotFoundException",
+      "+ FullyQualifiedErrorId : CommandNotFoundException"
+    ],
+    "analysis_options.yaml": [
+      "# This file configures the analyzer, which statically analyzes Dart code to",
+      "# check for errors, warnings, and lints.",
+      "include: package:flutter_lints/flutter.yaml",
+      "",
+      "analyzer:",
+      "exclude:",
+      "- \"**/*.g.dart\"",
+      "- \"**/*.freezed.dart\"",
+      "- \"**/*.mocks.dart\"",
+      "- \"**/generated_plugin_registrant.dart\""
+    ],
+    "ashur.iml": [
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+      "<module type=\"JAVA_MODULE\" version=\"4\">",
+      "<component name=\"NewModuleRootManager\" inherit-compiler-output=\"true\">",
+      "<exclude-output />",
+      "<content url=\"file://$MODULE_DIR$\">",
+      "<sourceFolder url=\"file://$MODULE_DIR$/lib\" isTestSource=\"false\" />",
+      "<sourceFolder url=\"file://$MODULE_DIR$/test\" isTestSource=\"true\" />",
+      "<excludeFolder url=\"file://$MODULE_DIR$/.dart_tool\" />",
+      "<excludeFolder url=\"file://$MODULE_DIR$/.idea\" />",
+      "<excludeFolder url=\"file://$MODULE_DIR$/build\" />"
+    ],
+    "devtools_options.yaml": [
+      "description: This file stores settings for Dart & Flutter DevTools.",
+      "documentation: https://docs.flutter.dev/tools/devtools/extensions#configure-extension-enablement-states",
+      "extensions:",
+      ""
+    ],
+    "firebase.json": [
+      "{",
+      "\"projects\": {",
+      "\"default\": \"ashur-official\"",
+      "},",
+      "\"firestore\": {",
+      "\"rules\": \"firestore.rules\",",
+      "\"indexes\": \"firestore.indexes.json\"",
+      "},",
+      "\"functions\": [",
+      "{"
+    ],
+    "firestore.indexes.json": [
+      "{",
+      "\"indexes\": [",
+      "{",
+      "\"collectionGroup\": \"invoices\",",
+      "\"queryScope\": \"COLLECTION\",",
+      "\"fields\": [",
+      "{",
+      "\"fieldPath\": \"isPaid\",",
+      "\"order\": \"ASCENDING\"",
+      "},"
+    ],
+    "firestore.rules": [
+      "rules_version = '2';",
+      "",
+      "service cloud.firestore {",
+      "match /databases/{database}/documents {",
+      "",
+      "// =========================================================================",
+      "// دوال مساعدة (Helper Functions)",
+      "// =========================================================================",
+      "",
+      "function isAuthenticated() {"
+    ],
+    "pubspec.lock": [
+      "# Generated by pub",
+      "# See https://dart.dev/tools/pub/glossary#lockfile",
+      "packages:",
+      "_fe_analyzer_shared:",
+      "dependency: transitive",
+      "description:",
+      "name: _fe_analyzer_shared",
+      "sha256: \"0b2f2bd91ba804e53a61d757b986f89f1f9eaed5b11e4b2f5a2468d86d6c9fc7\"",
+      "url: \"https://pub.dev\"",
+      "source: hosted"
+    ],
+    "pubspec.yaml": [
+      "name: ashur",
+      "description: \"A new Flutter project.\"",
+      "# The following line prevents the package from being accidentally published to",
+      "# pub.dev using `flutter pub publish`. This is preferred for private packages.",
+      "publish_to: \"none\" # Remove this line if you wish to publish to pub.dev",
+      "",
+      "# The following defines the version and build number for your application.",
+      "# A version number is three numbers separated by dots, like 1.2.43",
+      "# followed by an optional build number separated by a +.",
+      "# Both the version and the builder number may be overridden in flutter"
+    ],
+    "README.md": [
+      "# نظام إدارة المتاجر الآشوري (Ashur Store Management System)",
+      "",
+      "نظام شامل لإدارة المتاجر والأعمال التجارية مبني بتقنية Flutter مع دعم كامل للغة العربية والتصميم الآشوري الأصيل.",
+      "",
+      "## 🌟 الميزات الرئيسية",
+      "",
+      "### 📊 إدارة شاملة",
+      "- **إدارة المخزون**: تتبع المنتجات والكميات والأسعار",
+      "- **إدارة العملاء**: قاعدة بيانات العملاء والمجموعات",
+      "- **إدارة الفواتير**: إنشاء وتتبع الفواتير والمدفوعات"
+    ]
+  },
+  "importantFolders": [
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\ClientCertificates",
+      "category": "frontend",
+      "fileCount": 2
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\commerce_subscription_db",
+      "category": "scripts",
+      "fileCount": 2
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\Extension Scripts",
+      "category": "scripts",
+      "fileCount": 5
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\optimization_guide_hint_cache_store",
+      "category": "frontend",
+      "fileCount": 2
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\Segmentation Platform\\SignalStorageConfigDB",
+      "category": "config",
+      "fileCount": 2
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\Service Worker",
+      "category": "backend",
+      "fileCount": 10
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\Service Worker\\ScriptCache",
+      "category": "scripts",
+      "fileCount": 5
+    },
+    {
+      "path": ".dart_tool\\chrome-device\\Default\\WebStorage",
+      "category": "frontend",
+      "fileCount": 2
+    },
+    {
+      "path": ".dart_tool\\flutter_build",
+      "category": "frontend",
+      "fileCount": 58,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": ".dart_tool\\native_assets",
+      "category": "assets",
+      "fileCount": 0
+    },
+    {
+      "path": "android\\app",
+      "category": "frontend",
+      "fileCount": 59,
+      "primaryLanguage": "Kotlin Script"
+    },
+    {
+      "path": "android\\app\\src\\main\\kotlin\\com\\ashur\\app",
+      "category": "frontend",
+      "fileCount": 1,
+      "primaryLanguage": "Kotlin"
+    },
+    {
+      "path": "android\\app\\src\\main\\kotlin\\com\\example",
+      "category": "examples",
+      "fileCount": 0
+    },
+    {
+      "path": "android\\gradle\\wrapper",
+      "category": "frontend",
+      "fileCount": 2
+    },
+    {
+      "path": "assets",
+      "category": "assets",
+      "fileCount": 3
+    },
+    {
+      "path": "assets\\images",
+      "category": "assets",
+      "fileCount": 2
+    },
+    {
+      "path": "ios\\Runner\\Assets.xcassets",
+      "category": "assets",
+      "fileCount": 33
+    },
+    {
+      "path": "ios\\Runner\\Assets.xcassets\\AppIcon.appiconset",
+      "category": "frontend",
+      "fileCount": 22
+    },
+    {
+      "path": "ios\\Runner\\Assets.xcassets\\LaunchBackground.imageset",
+      "category": "assets",
+      "fileCount": 3
+    },
+    {
+      "path": "ios\\Runner\\Assets.xcassets\\LaunchImage.imageset",
+      "category": "assets",
+      "fileCount": 8
+    },
+    {
+      "path": "ios\\RunnerTests",
+      "category": "tests",
+      "fileCount": 1,
+      "primaryLanguage": "Swift"
+    },
+    {
+      "path": "lib",
+      "category": "core",
+      "fileCount": 663,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\app",
+      "category": "frontend",
+      "fileCount": 19,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\app\\config",
+      "category": "config",
+      "fileCount": 1,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\app\\routes",
+      "category": "build",
+      "fileCount": 15,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\app\\routes\\route_builders",
+      "category": "frontend",
+      "fileCount": 11,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\app\\routes\\route_guards",
+      "category": "build",
+      "fileCount": 2,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\core",
+      "category": "core",
+      "fileCount": 79,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\core\\services",
+      "category": "backend",
+      "fileCount": 30,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\features\\settings",
+      "category": "config",
+      "fileCount": 29,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "lib\\features\\subscriptions",
+      "category": "scripts",
+      "fileCount": 60,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "macos\\Runner\\Assets.xcassets",
+      "category": "assets",
+      "fileCount": 8
+    },
+    {
+      "path": "macos\\Runner\\Assets.xcassets\\AppIcon.appiconset",
+      "category": "frontend",
+      "fileCount": 8
+    },
+    {
+      "path": "macos\\Runner\\Configs",
+      "category": "config",
+      "fileCount": 4
+    },
+    {
+      "path": "macos\\RunnerTests",
+      "category": "tests",
+      "fileCount": 1,
+      "primaryLanguage": "Swift"
+    },
+    {
+      "path": "test",
+      "category": "tests",
+      "fileCount": 2,
+      "primaryLanguage": "Dart"
+    },
+    {
+      "path": "web",
+      "category": "frontend",
+      "fileCount": 7
+    },
+    {
+      "path": "windows\\flutter\\ephemeral\\.plugin_symlinks\\firebase_app_check",
+      "category": "frontend",
+      "fileCount": 0
+    },
+    {
+      "path": "windows\\flutter\\ephemeral\\.plugin_symlinks\\firebase_core",
+      "category": "core",
+      "fileCount": 0
+    }
+  ],
+  "readmeParagraphs": {
+    ".dart_tool\\chrome-device\\Default": "Google Chrome settings and storage represent user-selected preferences and information and MUST not be extracted, overwritten or modified except through Google Chrome defined APIs.",
+    "ios\\Runner\\Assets.xcassets\\LaunchImage.imageset": "# Launch Screen Assets\r\n\r\nYou can customize the launch screen with your own desired assets by replacing the image files in this directory.\r",
+    "lib\\core\\email": "# Email Normalization Service",
+    "lib\\core\\mixins": "# Save Operation Mixin\r\n\r\n## نظام إدارة عمليات الحفظ الموحد\r",
+    "root": "# نظام إدارة المتاجر الآشوري (Ashur Store Management System)\r\n\r\nنظام شامل لإدارة المتاجر والأعمال التجارية مبني بتقنية Flutter مع دعم كامل للغة العربية والتصميم الآشوري الأصيل.\r"
+  },
+  "totals": {
+    "numFiles": 1731,
+    "numDirs": 402,
+    "totalSizeBytes": 467311400,
+    "totalLinesOfCode": 239897
+  },
+  "fileCategories": {
+    "other": 918,
+    "source": 698,
+    "config": 85,
+    "documentation": 29,
+    "build": 1
+  },
+  "linesOfCodePerLanguage": {
+    "Dart": 234509,
+    "Kotlin Script": 164,
+    "Java": 145,
+    "Kotlin": 19,
+    "Batch": 91,
+    "JavaScript": 3860,
+    "Python": 33,
+    "Shell": 27,
+    "Swift": 117,
+    "C/C++": 247,
+    "C++": 685
+  },
+  "filesPerLanguage": {
+    "Dart": 665,
+    "Kotlin Script": 3,
+    "Java": 1,
+    "Kotlin": 1,
+    "Batch": 1,
+    "JavaScript": 1,
+    "Python": 1,
+    "Shell": 2,
+    "Swift": 6,
+    "C/C++": 9,
+    "C++": 8
+  },
+  "projectTypes": [
+    "JavaScript/Node.js",
+    "C/C++ (CMake)",
+    "Dart (Pub)"
+  ],
+  "frameworks": [],
+  "entryPoints": [
+    "ios\\Flutter\\flutter_export_environment.sh",
+    "lib\\core\\navigation\\main_navigation_page.dart",
+    "lib\\core\\services\\one_signal_notification_service.dart",
+    "lib\\core\\widgets\\connection_monitor.dart",
+    "macos\\Flutter\\ephemeral\\flutter_export_environment.sh"
+  ],
+  "ciCdTools": [],
+  "packageManagers": [],
+  "topLevelDirectories": [
+    {
+      "name": "lib",
+      "numFiles": 663,
+      "totalLoc": 233670,
+      "dominantLanguage": "Dart"
+    },
+    {
+      "name": "functions",
+      "numFiles": 6,
+      "totalLoc": 3860,
+      "dominantLanguage": "JavaScript"
+    },
+    {
+      "name": "windows",
+      "numFiles": 18,
+      "totalLoc": 703,
+      "dominantLanguage": "C++"
+    },
+    {
+      "name": "android",
+      "numFiles": 620,
+      "totalLoc": 419,
+      "dominantLanguage": "Kotlin Script"
+    },
+    {
+      "name": "test",
+      "numFiles": 2,
+      "totalLoc": 353,
+      "dominantLanguage": "Dart"
+    },
+    {
+      "name": "linux",
+      "numFiles": 10,
+      "totalLoc": 207,
+      "dominantLanguage": "C++"
+    },
+    {
+      "name": "macos",
+      "numFiles": 30,
+      "totalLoc": 103,
+      "dominantLanguage": "Swift"
+    },
+    {
+      "name": "ios",
+      "numFiles": 58,
+      "totalLoc": 96,
+      "dominantLanguage": "Swift"
+    },
+    {
+      "name": "assets",
+      "numFiles": 3,
+      "totalLoc": 0
+    },
+    {
+      "name": "web",
+      "numFiles": 7,
+      "totalLoc": 0
+    }
+  ],
+  "detailedDirectories": [
+    {
+      "path": "lib",
+      "name": "lib",
+      "level": 1,
+      "numFiles": 663,
+      "totalLoc": 233670,
+      "dominantLanguage": "Dart",
+      "category": "Library",
+      "description": "Library module with 663 files (Dart)",
+      "subdirectories": [
+        {
+          "path": "lib\\features",
+          "name": "features",
+          "level": 2,
+          "numFiles": 563,
+          "totalLoc": 210131,
+          "dominantLanguage": "Dart",
+          "category": "General",
+          "description": "General module with 563 files (Dart)",
+          "subdirectories": [
+            {
+              "path": "lib\\features\\inventory",
+              "name": "inventory",
+              "level": 3,
+              "numFiles": 75,
+              "totalLoc": 24809,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 75 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\features\\customers",
+              "name": "customers",
+              "level": 3,
+              "numFiles": 52,
+              "totalLoc": 23666,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 52 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\features\\expenses",
+              "name": "expenses",
+              "level": 3,
+              "numFiles": 43,
+              "totalLoc": 12912,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 43 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\features\\auth",
+              "name": "auth",
+              "level": 3,
+              "numFiles": 24,
+              "totalLoc": 8944,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 24 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\features\\dashboard",
+              "name": "dashboard",
+              "level": 3,
+              "numFiles": 11,
+              "totalLoc": 3084,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 11 files (Dart)",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "lib\\core",
+          "name": "core",
+          "level": 2,
+          "numFiles": 79,
+          "totalLoc": 20031,
+          "dominantLanguage": "Dart",
+          "category": "Core/Business",
+          "description": "Core/Business module with 79 files (Dart)",
+          "subdirectories": [
+            {
+              "path": "lib\\core\\mixins",
+              "name": "mixins",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 411,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "# Save Operation Mixin\r",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\core\\email",
+              "name": "email",
+              "level": 3,
+              "numFiles": 4,
+              "totalLoc": 327,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "# Email Normalization Service",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\core\\middleware",
+              "name": "middleware",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 236,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 1 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\core\\constants",
+              "name": "constants",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 118,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 1 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\core\\error",
+              "name": "error",
+              "level": 3,
+              "numFiles": 3,
+              "totalLoc": 79,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 3 files (Dart)",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "lib\\app",
+          "name": "app",
+          "level": 2,
+          "numFiles": 19,
+          "totalLoc": 3386,
+          "dominantLanguage": "Dart",
+          "category": "Application",
+          "description": "Application module with 19 files (Dart)",
+          "subdirectories": [
+            {
+              "path": "lib\\app\\routes",
+              "name": "routes",
+              "level": 3,
+              "numFiles": 15,
+              "totalLoc": 2742,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 15 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\app\\theme",
+              "name": "theme",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 260,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 1 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\app\\config",
+              "name": "config",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 177,
+              "dominantLanguage": "Dart",
+              "category": "Configuration",
+              "description": "Configuration module with 1 files (Dart)",
+              "subdirectories": []
+            },
+            {
+              "path": "lib\\app\\auth",
+              "name": "auth",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 94,
+              "dominantLanguage": "Dart",
+              "category": "General",
+              "description": "General module with 1 files (Dart)",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "functions",
+      "name": "functions",
+      "level": 1,
+      "numFiles": 6,
+      "totalLoc": 3860,
+      "dominantLanguage": "JavaScript",
+      "category": "General",
+      "description": "General module with 6 files (JavaScript)",
+      "subdirectories": []
+    },
+    {
+      "path": "android",
+      "name": "android",
+      "level": 1,
+      "numFiles": 620,
+      "totalLoc": 419,
+      "dominantLanguage": "Kotlin Script",
+      "category": "General",
+      "description": "General module with 620 files (Kotlin Script)",
+      "subdirectories": [
+        {
+          "path": "android\\app",
+          "name": "app",
+          "level": 2,
+          "numFiles": 59,
+          "totalLoc": 263,
+          "dominantLanguage": "Kotlin Script",
+          "category": "Application",
+          "description": "Application module with 59 files (Kotlin Script)",
+          "subdirectories": [
+            {
+              "path": "android\\app\\src",
+              "name": "src",
+              "level": 3,
+              "numFiles": 56,
+              "totalLoc": 164,
+              "dominantLanguage": "Java",
+              "category": "General",
+              "description": "General module with 56 files (Java)",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "android\\gradle",
+          "name": "gradle",
+          "level": 2,
+          "numFiles": 2,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 2 files",
+          "subdirectories": [
+            {
+              "path": "android\\gradle\\wrapper",
+              "name": "wrapper",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 0,
+              "category": "Application",
+              "description": "Application module with 2 files",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "windows",
+      "name": "windows",
+      "level": 1,
+      "numFiles": 18,
+      "totalLoc": 703,
+      "dominantLanguage": "C++",
+      "category": "General",
+      "description": "General module with 18 files (C++)",
+      "subdirectories": [
+        {
+          "path": "windows\\runner",
+          "name": "runner",
+          "level": 2,
+          "numFiles": 12,
+          "totalLoc": 645,
+          "dominantLanguage": "C++",
+          "category": "General",
+          "description": "General module with 12 files (C++)",
+          "subdirectories": [
+            {
+              "path": "windows\\runner\\resources",
+              "name": "resources",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 1 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "windows\\flutter",
+          "name": "flutter",
+          "level": 2,
+          "numFiles": 4,
+          "totalLoc": 58,
+          "dominantLanguage": "C++",
+          "category": "General",
+          "description": "General module with 4 files (C++)",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "test",
+      "name": "test",
+      "level": 1,
+      "numFiles": 2,
+      "totalLoc": 353,
+      "dominantLanguage": "Dart",
+      "category": "Testing",
+      "description": "Testing module with 2 files (Dart)",
+      "subdirectories": []
+    },
+    {
+      "path": "linux",
+      "name": "linux",
+      "level": 1,
+      "numFiles": 10,
+      "totalLoc": 207,
+      "dominantLanguage": "C++",
+      "category": "General",
+      "description": "General module with 10 files (C++)",
+      "subdirectories": [
+        {
+          "path": "linux\\runner",
+          "name": "runner",
+          "level": 2,
+          "numFiles": 4,
+          "totalLoc": 171,
+          "dominantLanguage": "C++",
+          "category": "General",
+          "description": "General module with 4 files (C++)",
+          "subdirectories": []
+        },
+        {
+          "path": "linux\\flutter",
+          "name": "flutter",
+          "level": 2,
+          "numFiles": 4,
+          "totalLoc": 36,
+          "dominantLanguage": "C++",
+          "category": "General",
+          "description": "General module with 4 files (C++)",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "ios",
+      "name": "ios",
+      "level": 1,
+      "numFiles": 58,
+      "totalLoc": 96,
+      "dominantLanguage": "Swift",
+      "category": "General",
+      "description": "General module with 58 files (Swift)",
+      "subdirectories": [
+        {
+          "path": "ios\\Runner",
+          "name": "Runner",
+          "level": 2,
+          "numFiles": 41,
+          "totalLoc": 36,
+          "dominantLanguage": "C/C++",
+          "category": "General",
+          "description": "General module with 41 files (C/C++)",
+          "subdirectories": [
+            {
+              "path": "ios\\Runner\\Assets.xcassets",
+              "name": "Assets.xcassets",
+              "level": 3,
+              "numFiles": 33,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 33 files",
+              "subdirectories": []
+            },
+            {
+              "path": "ios\\Runner\\Base.lproj",
+              "name": "Base.lproj",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 2 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "ios\\Flutter",
+          "name": "Flutter",
+          "level": 2,
+          "numFiles": 7,
+          "totalLoc": 47,
+          "dominantLanguage": "Python",
+          "category": "General",
+          "description": "General module with 7 files (Python)",
+          "subdirectories": [
+            {
+              "path": "ios\\Flutter\\ephemeral",
+              "name": "ephemeral",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 33,
+              "dominantLanguage": "Python",
+              "category": "General",
+              "description": "General module with 2 files (Python)",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "ios\\RunnerTests",
+          "name": "RunnerTests",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 13,
+          "dominantLanguage": "Swift",
+          "category": "Testing",
+          "description": "Testing module with 1 files (Swift)",
+          "subdirectories": []
+        },
+        {
+          "path": "ios\\Runner.xcodeproj",
+          "name": "Runner.xcodeproj",
+          "level": 2,
+          "numFiles": 5,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 5 files",
+          "subdirectories": [
+            {
+              "path": "ios\\Runner.xcodeproj\\project.xcworkspace",
+              "name": "project.xcworkspace",
+              "level": 3,
+              "numFiles": 3,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 3 files",
+              "subdirectories": []
+            },
+            {
+              "path": "ios\\Runner.xcodeproj\\xcshareddata",
+              "name": "xcshareddata",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "Data",
+              "description": "Data module with 1 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "ios\\Runner.xcworkspace",
+          "name": "Runner.xcworkspace",
+          "level": 2,
+          "numFiles": 3,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 3 files",
+          "subdirectories": [
+            {
+              "path": "ios\\Runner.xcworkspace\\xcshareddata",
+              "name": "xcshareddata",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 0,
+              "category": "Data",
+              "description": "Data module with 2 files",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "macos",
+      "name": "macos",
+      "level": 1,
+      "numFiles": 30,
+      "totalLoc": 103,
+      "dominantLanguage": "Swift",
+      "category": "General",
+      "description": "General module with 30 files (Swift)",
+      "subdirectories": [
+        {
+          "path": "macos\\Flutter",
+          "name": "Flutter",
+          "level": 2,
+          "numFiles": 5,
+          "totalLoc": 60,
+          "dominantLanguage": "Shell",
+          "category": "General",
+          "description": "General module with 5 files (Shell)",
+          "subdirectories": [
+            {
+              "path": "macos\\Flutter\\ephemeral",
+              "name": "ephemeral",
+              "level": 3,
+              "numFiles": 2,
+              "totalLoc": 13,
+              "dominantLanguage": "Shell",
+              "category": "General",
+              "description": "General module with 2 files (Shell)",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "macos\\Runner",
+          "name": "Runner",
+          "level": 2,
+          "numFiles": 18,
+          "totalLoc": 30,
+          "dominantLanguage": "Swift",
+          "category": "General",
+          "description": "General module with 18 files (Swift)",
+          "subdirectories": [
+            {
+              "path": "macos\\Runner\\Assets.xcassets",
+              "name": "Assets.xcassets",
+              "level": 3,
+              "numFiles": 8,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 8 files",
+              "subdirectories": []
+            },
+            {
+              "path": "macos\\Runner\\Configs",
+              "name": "Configs",
+              "level": 3,
+              "numFiles": 4,
+              "totalLoc": 0,
+              "category": "Configuration",
+              "description": "Configuration module with 4 files",
+              "subdirectories": []
+            },
+            {
+              "path": "macos\\Runner\\Base.lproj",
+              "name": "Base.lproj",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 1 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "macos\\RunnerTests",
+          "name": "RunnerTests",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 13,
+          "dominantLanguage": "Swift",
+          "category": "Testing",
+          "description": "Testing module with 1 files (Swift)",
+          "subdirectories": []
+        },
+        {
+          "path": "macos\\Runner.xcodeproj",
+          "name": "Runner.xcodeproj",
+          "level": 2,
+          "numFiles": 3,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 3 files",
+          "subdirectories": [
+            {
+              "path": "macos\\Runner.xcodeproj\\project.xcworkspace",
+              "name": "project.xcworkspace",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "General",
+              "description": "General module with 1 files",
+              "subdirectories": []
+            },
+            {
+              "path": "macos\\Runner.xcodeproj\\xcshareddata",
+              "name": "xcshareddata",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "Data",
+              "description": "Data module with 1 files",
+              "subdirectories": []
+            }
+          ]
+        },
+        {
+          "path": "macos\\Runner.xcworkspace",
+          "name": "Runner.xcworkspace",
+          "level": 2,
+          "numFiles": 2,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 2 files",
+          "subdirectories": [
+            {
+              "path": "macos\\Runner.xcworkspace\\xcshareddata",
+              "name": "xcshareddata",
+              "level": 3,
+              "numFiles": 1,
+              "totalLoc": 0,
+              "category": "Data",
+              "description": "Data module with 1 files",
+              "subdirectories": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "web",
+      "name": "web",
+      "level": 1,
+      "numFiles": 7,
+      "totalLoc": 0,
+      "category": "Web/UI",
+      "description": "Web/UI module with 7 files",
+      "subdirectories": [
+        {
+          "path": "web\\icons",
+          "name": "icons",
+          "level": 2,
+          "numFiles": 4,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 4 files",
+          "subdirectories": []
+        }
+      ]
+    },
+    {
+      "path": "assets",
+      "name": "assets",
+      "level": 1,
+      "numFiles": 3,
+      "totalLoc": 0,
+      "category": "General",
+      "description": "General module with 3 files",
+      "subdirectories": [
+        {
+          "path": "assets\\images",
+          "name": "images",
+          "level": 2,
+          "numFiles": 2,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 2 files",
+          "subdirectories": []
+        },
+        {
+          "path": "assets\\fonts",
+          "name": "fonts",
+          "level": 2,
+          "numFiles": 1,
+          "totalLoc": 0,
+          "category": "General",
+          "description": "General module with 1 files",
+          "subdirectories": []
+        }
+      ]
+    }
+  ],
+  "architecturalInsights": {
+    "coreApplications": [],
+    "entryPointDetails": [
+      {
+        "path": "C:\\Users\\faisa\\AppData\\Local\\Programs\\Microsoft VS Code\\ios\\Flutter\\flutter_export_environment.sh",
+        "type": "Unknown",
+        "description": ""
+      },
+      {
+        "path": "C:\\Users\\faisa\\AppData\\Local\\Programs\\Microsoft VS Code\\lib\\core\\navigation\\main_navigation_page.dart",
+        "type": "Unknown",
+        "description": ""
+      },
+      {
+        "path": "C:\\Users\\faisa\\AppData\\Local\\Programs\\Microsoft VS Code\\lib\\core\\services\\one_signal_notification_service.dart",
+        "type": "Unknown",
+        "description": ""
+      },
+      {
+        "path": "C:\\Users\\faisa\\AppData\\Local\\Programs\\Microsoft VS Code\\lib\\core\\widgets\\connection_monitor.dart",
+        "type": "Unknown",
+        "description": ""
+      },
+      {
+        "path": "C:\\Users\\faisa\\AppData\\Local\\Programs\\Microsoft VS Code\\macos\\Flutter\\ephemeral\\flutter_export_environment.sh",
+        "type": "Unknown",
+        "description": ""
+      }
+    ],
+    "serviceArchitecture": {
+      "microservices": [],
+      "monoliths": [],
+      "libraries": [
+        "lib"
+      ]
+    },
+    "layeredArchitecture": {
+      "presentation": [
+        "web"
+      ],
+      "business": [],
+      "data": [],
+      "infrastructure": []
+    }
+  },
+  "largeFiles": [
+    {
+      "path": ".dart_tool\\flutter_build\\48ad485467006095b7a5c7b41657d5af\\app.dill",
+      "sizeMb": 102.54
+    },
+    {
+      "path": ".dart_tool\\flutter_build\\7aa4e2b8ea2d60247173a9b16fcf1802\\app.dill",
+      "sizeMb": 101.25
+    },
+    {
+      "path": ".dart_tool\\flutter_build\\b54aafcf9be5bf07abff4f2815c86aea\\app.dill",
+      "sizeMb": 67
+    },
+    {
+      "path": ".dart_tool\\flutter_build\\b54aafcf9be5bf07abff4f2815c86aea\\armeabi-v7a\\app.so",
+      "sizeMb": 18.33
+    },
+    {
+      "path": ".dart_tool\\flutter_build\\b54aafcf9be5bf07abff4f2815c86aea\\x86_64\\app.so",
+      "sizeMb": 16.81
+    },
+    {
+      "path": ".dart_tool\\flutter_build\\b54aafcf9be5bf07abff4f2815c86aea\\arm64-v8a\\app.so",
+      "sizeMb": 16.38
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\23850bae05\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\337ce265dc\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\4b79ae3351\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\583f4365b0\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\58cec070c6\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\6c9cfca221\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\7b521f47a9\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\8e04c28b44\\hook.dill",
+      "sizeMb": 10.16
+    },
+    {
+      "path": ".dart_tool\\hooks_runner\\objective_c\\9df9adb014\\hook.dill",
+      "sizeMb": 10.16
+    }
+  ],
+  "dependencies": {
+    "production": [],
+    "development": [],
+    "total": 0
+  },
+  "complexity": {
+    "averageFileSize": 138.5886770652802,
+    "maxFileSize": 1075209.8304,
+    "nestedDepth": 0,
+    "estimatedComplexity": "very high"
+  }
+}

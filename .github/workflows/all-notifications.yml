@@ -1,0 +1,50 @@
+name: All notifications
+
+on:
+  schedule:
+    # Run every 5 minutes at minute 0 UTC (every 5 minutes at minute 3 Iraq time, UTC+3).
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: all-notifications
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install notifier dependencies
+        working-directory: functions
+        run: npm ci --omit=dev
+
+      - name: Configure Firebase service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Missing FIREBASE_SERVICE_ACCOUNT_JSON repository secret" >&2
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-service-account.json" >> "$GITHUB_ENV"
+
+      - name: Send all notifications (subscription, invoice, customer, inventory, maintenance, rental, expense)
+        working-directory: functions
+        env:
+          ONESIGNAL_REST_API_KEY: ${{ secrets.ONESIGNAL_REST_API_KEY }}
+        run: node all_notifier.js

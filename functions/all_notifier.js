@@ -3,8 +3,8 @@ const crypto = require("node:crypto");
 
 const ONESIGNAL_APP_ID = "e309b00d-2d36-4285-ac55-f7b5831d731d";
 const MAX_WARNING_DAYS = 30;
-const FIRESTORE_PAGE_SIZE = 50;
-const FIRESTORE_READ_BATCH_SIZE = 50;
+const FIRESTORE_PAGE_SIZE = 20;
+const FIRESTORE_READ_BATCH_SIZE = 20;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));

@@ -313,7 +313,10 @@ async function processCollection({
         totals.sent++;
       } catch (error) {
         totals.errors++;
-        console.error(`Failed ${collectionName} ${doc.ref.path}:`, error.message);
+        console.error(
+          `Failed ${collectionName} ${doc.ref.path}:`,
+          error.message,
+        );
       }
     }
     if (page.size < FIRESTORE_PAGE_SIZE) break;
@@ -336,7 +339,9 @@ async function run() {
       });
     } catch (err) {
       console.error("Failed to initialize Firebase Admin:", err.message);
-      console.error("Make sure GOOGLE_APPLICATION_CREDENTIALS is set or running on Google Cloud.");
+      console.error(
+        "Make sure GOOGLE_APPLICATION_CREDENTIALS is set or running on Google Cloud.",
+      );
       process.exitCode = 1;
       return;
     }
@@ -394,931 +399,905 @@ async function run() {
           `باقي ${daysRemaining} يوم على انتهاء اشتراك ${
             it.customerName || "المشترك"
           } (${it.name || ""}).`,
-          idField: "id",
-          typeKey: "subscription_alert_expiring_soon",
-        };
-      },
-    };
+        idField: "id",
+        typeKey: "subscription_alert_expiring_soon",
+      };
+    },
+  };
 
-    const orgEmails = new Set();
-    let lastDoc = null;
+  const orgEmails = new Set();
+  let lastDoc = null;
+  while (true) {
+    let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
+    if (lastDoc) query = query.startAfter(lastDoc);
+    const page = await query.get();
+    if (page.empty) break;
+    lastDoc = page.docs[page.docs.length - 1];
+    grandTotals.scanned += page.size;
+    for (const doc of page.docs) {
+      const sub = doc.data();
+      const oe = normalizeOrganizationEmail(sub.organizationEmail || "");
+      if (oe.includes("@")) orgEmails.add(oe);
+    }
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+
+  for (const orgEmail of orgEmails) {
+    const settings = await readSettings(db, orgEmail);
+    const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
+    let lastDocument = null;
     while (true) {
-      let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
+      let query = db
+        .collectionGroup("subscriptions")
+        .limit(FIRESTORE_PAGE_SIZE);
+      if (lastDocument) query = query.startAfter(lastDocument);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDocument = page.docs[page.docs.length - 1];
+
+      for (const doc of page.docs) {
+        const item = doc.data();
+        if (
+          normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail
+        )
+          continue;
+        try {
+          const kindInfo = subscriptionTypes.getNotificationKind(item, today);
+          if (!kindInfo) {
+            grandTotals.skipped++;
+            continue;
+          }
+          const typeKey = kindInfo.typeKey;
+          if (!asBool(settings.subscriptions[typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            typeKey,
+            kindInfo.daysRemaining,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+          const dateField = toDate(item.endDate);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${kindInfo.kind}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`subscription_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              kindInfo.kind,
+              kindInfo.title,
+              kindInfo.body(item),
+              { type: typeKey, subscription_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: kindInfo.kind,
+            subscriptionId: doc.id,
+            endDate: admin.firestore.Timestamp.fromDate(dateField || today),
+            daysRemaining: kindInfo.daysRemaining,
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed subscription ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  // ========== 2. INVOICES ==========
+  const invoiceTypes = [
+    {
+      name: "invoice_overdue",
+      typeKey: "invoice_alert_overdue",
+      collection: "invoices",
+      dateField: "dueDate",
+      kind: "overdue",
+      title: "فاتورة متأخرة",
+      bodyTemplate: (it) =>
+        `فاتورة ${it.customerName || "العميل"} بمبلغ ${
+          it.totalAmount || 0
+        } د.ع متأخرة عن السداد.`,
+    },
+    {
+      name: "invoice_new",
+      typeKey: "invoice_notify_new",
+      collection: "invoices",
+      dateField: "createdAt",
+      kind: "new",
+      title: "فاتورة جديدة",
+      bodyTemplate: (it) =>
+        `تم إصدار فاتورة جديدة للعميل ${
+          it.customerName || "العميل"
+        } بمبلغ ${it.totalAmount || 0} د.ع.`,
+    },
+  ];
+
+  for (const invType of invoiceTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db.collectionGroup("invoices").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();
       if (page.empty) break;
       lastDoc = page.docs[page.docs.length - 1];
       grandTotals.scanned += page.size;
+
       for (const doc of page.docs) {
-        const sub = doc.data();
-        const oe = normalizeOrganizationEmail(sub.organizationEmail || "");
-        if (oe.includes("@")) orgEmails.add(oe);
+        try {
+          const invoice = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            invoice.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const invoiceSettings = settings.invoices || {};
+          if (
+            !asBool(invoiceSettings.invoiceAlertsEnabled, true) ||
+            !asBool(invoiceSettings.invoiceAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (invType.kind === "overdue") {
+            if (!asBool(invoiceSettings.invoice_alert_overdue, true)) {
+              grandTotals.skipped++;
+              continue;
+            }
+          } else {
+            if (!asBool(invoiceSettings.invoice_notify_new, true)) {
+              grandTotals.skipped++;
+              continue;
+            }
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            invType.typeKey,
+            0,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(invoice[invType.dateField]);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${invType.kind}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`invoice_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              invType.typeKey,
+              invType.title,
+              invType.bodyTemplate(
+                invoice.customerName || "العميل",
+                invoice.totalAmount || 0,
+              ),
+              { type: invType.typeKey, invoice_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: invType.kind,
+            invoiceId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed invoice ${doc.ref.path}:`, error.message);
+        }
       }
       if (page.size < FIRESTORE_PAGE_SIZE) break;
     }
-
-    for (const orgEmail of orgEmails) {
-      const settings = await readSettings(db, orgEmail);
-      const { users, settingsById } = await readUsersAndSettings(
-        db,
-        orgEmail,
-      );
-      let lastDocument = null;
-      while (true) {
-        let query = db
-          .collectionGroup("subscriptions")
-          .limit(FIRESTORE_PAGE_SIZE);
-        if (lastDocument) query = query.startAfter(lastDocument);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDocument = page.docs[page.docs.length - 1];
-
-        for (const doc of page.docs) {
-          const item = doc.data();
-          if (
-            normalizeOrganizationEmail(item.organizationEmail || "") !==
-            orgEmail
-          )
-            continue;
-          try {
-            const kindInfo = subscriptionTypes.getNotificationKind(
-              item,
-              today,
-            );
-            if (!kindInfo) {
-              grandTotals.skipped++;
-              continue;
-            }
-            const typeKey = kindInfo.typeKey;
-            if (!asBool(settings.subscriptions[typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              typeKey,
-              kindInfo.daysRemaining,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-            const dateField = toDate(item.endDate);
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${kindInfo.kind}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`subscription_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                kindInfo.kind,
-                kindInfo.title,
-                kindInfo.body(item),
-                { type: typeKey, subscription_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: kindInfo.kind,
-              subscriptionId: doc.id,
-              endDate: admin.firestore.Timestamp.fromDate(
-                dateField || today,
-              ),
-              daysRemaining: kindInfo.daysRemaining,
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(
-              `Failed subscription ${doc.ref.path}:`,
-              error.message,
-            );
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 2. INVOICES ==========
-    const invoiceTypes = [
-      {
-        name: "invoice_overdue",
-        typeKey: "invoice_alert_overdue",
-        collection: "invoices",
-        dateField: "dueDate",
-        kind: "overdue",
-        title: "فاتورة متأخرة",
-        bodyTemplate: (it) =>
-          `فاتورة ${it.customerName || "العميل"} بمبلغ ${
-            it.totalAmount || 0
-          } د.ع متأخرة عن السداد.`,
-      },
-      {
-        name: "invoice_new",
-        typeKey: "invoice_notify_new",
-        collection: "invoices",
-        dateField: "createdAt",
-        kind: "new",
-        title: "فاتورة جديدة",
-        bodyTemplate: (it) =>
-          `تم إصدار فاتورة جديدة للعميل ${
-            it.customerName || "العميل"
-          } بمبلغ ${it.totalAmount || 0} د.ع.`,
-      },
-    ];
-
-    for (const invType of invoiceTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db.collectionGroup("invoices").limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const invoice = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              invoice.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const invoiceSettings = settings.invoices || {};
-            if (
-              !asBool(invoiceSettings.invoiceAlertsEnabled, true) ||
-              !asBool(invoiceSettings.invoiceAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (invType.kind === "overdue") {
-              if (!asBool(invoiceSettings.invoice_alert_overdue, true)) {
-                grandTotals.skipped++;
-                continue;
-              }
-            } else {
-              if (!asBool(invoiceSettings.invoice_notify_new, true)) {
-                grandTotals.skipped++;
-                continue;
-              }
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              invType.typeKey,
-              0,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(invoice[invType.dateField]);
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${invType.kind}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`invoice_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                invType.typeKey,
-                invType.title,
-                invType.bodyTemplate(
-                  invoice.customerName || "العميل",
-                  invoice.totalAmount || 0,
-                ),
-                { type: invType.typeKey, invoice_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: invType.kind,
-              invoiceId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(`Failed invoice ${doc.ref.path}:`, error.message);
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 3. CUSTOMERS ==========
-    const customerTypes = [
-      {
-        name: "customer_high_debt",
-        typeKey: "customer_alert_high_debt",
-        collection: "customers",
-        title: "تنبيه ديون عميل",
-        bodyTemplate: (it) =>
-          `العميل "${it.name || "العميل"}" عليه مستحقات مرتفعة بمبلغ ${
-            it.totalDebt || 0
-          } د.ع`,
-      },
-      {
-        name: "customer_credit_limit",
-        typeKey: "customer_alert_credit_limit",
-        collection: "customers",
-        title: "تجاوز حد الائتمان",
-        bodyTemplate: (it) =>
-          `العميل "${it.name || "العميل"}" تجاوز حد الائتمان (${
-            it.creditLimit || 0
-          }). إجمالي الدين: ${it.totalDebt || 0}`,
-      },
-      {
-        name: "customer_zero_balance",
-        typeKey: "customer_notify_zero_balance",
-        collection: "customers",
-        title: "تصفير حساب عميل",
-        bodyTemplate: (it) =>
-          `تم تسديد كامل ديون العميل "${it.name || "العميل"}" وأصبح رصيد حسابه 0.00 د.ع`,
-      },
-      {
-        name: "customer_new",
-        typeKey: "customer_notify_new",
-        collection: "customers",
-        title: "تسجيل عميل جديد",
-        bodyTemplate: (it) =>
-          `تمت إضافة العميل "${it.name || "العميل"}" بنجاح إلى سجل العملاء`,
-      },
-    ];
-
-    for (const custType of customerTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db.collectionGroup("customers").limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const customer = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              customer.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const customerSettings = settings.customers || {};
-            if (
-              !asBool(customerSettings.customerAlertsEnabled, true) ||
-              !asBool(customerSettings.customerAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (!asBool(customerSettings[custType.typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              custType.typeKey,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(
-              customer.createdAt || customer.updatedAt,
-            );
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${custType.name}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`customer_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                custType.typeKey,
-                custType.title,
-                custType.bodyTemplate(customer),
-                { type: custType.typeKey, customer_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: custType.name,
-              customerId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(`Failed customer ${doc.ref.path}:`, error.message);
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 4. INVENTORY ==========
-    const inventoryTypes = [
-      {
-        name: "inventory_out_of_stock",
-        typeKey: "inventory_alert_out_of_stock",
-        collection: "products",
-        title: "نفاد كمية مادة",
-        bodyTemplate: (it) =>
-          `المادة "${it.name || "مادة"}" نفدت تماماً من المخزون!`,
-      },
-      {
-        name: "inventory_low_stock",
-        typeKey: "inventory_alert_low_stock",
-        collection: "products",
-        title: "تنبيه مخزون منخفض",
-        bodyTemplate: (it) =>
-          `المادة "${it.name || "مادة"}" متبقي منها كمية منخفضة من المخزون!`,
-      },
-      {
-        name: "inventory_new",
-        typeKey: "inventory_notify_new",
-        collection: "products",
-        title: "إضافة مادة جديدة",
-        bodyTemplate: (it) =>
-          `تمت إضافة المادة "${it.name || "مادة"}" إلى المخزون`,
-      },
-    ];
-
-    for (const invType of inventoryTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db.collectionGroup("products").limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const product = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              product.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const inventorySettings = settings.inventory || {};
-            if (
-              !asBool(inventorySettings.inventoryAlertsEnabled, true) ||
-              !asBool(inventorySettings.inventoryAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (!asBool(inventorySettings[invType.typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              invType.typeKey,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(
-              product.createdAt || product.updatedAt,
-            );
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${invType.name}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`inventory_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                invType.typeKey,
-                invType.title,
-                invType.bodyTemplate(product.name || "مادة"),
-                { type: invType.typeKey, product_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: invType.name,
-              productId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(`Failed product ${doc.ref.path}:`, error.message);
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 5. MAINTENANCE ==========
-    const maintenanceTypes = [
-      {
-        name: "maintenance_overdue",
-        typeKey: "maintenance_alert_overdue",
-        collection: "maintenance_requests",
-        title: "صيانة متأخرة",
-        bodyTemplate: (it) =>
-          `طلب الصيانة "${it.title || "طلب صيانة"}" للعميل ${
-            it.customerName || "العميل"
-          } متأخر عن موعده المجدول`,
-      },
-      {
-        name: "maintenance_urgent",
-        typeKey: "maintenance_alert_urgent",
-        collection: "maintenance_requests",
-        title: "طلب صيانة عاجل",
-        bodyTemplate: (it) =>
-          `طلب الصيانة "${it.title || "طلب صيانة"}" للعميل ${
-            it.customerName || "العميل"
-          } بحالة عاجلة وبحاجة للمتابعة`,
-      },
-      {
-        name: "maintenance_new",
-        typeKey: "maintenance_notify_new",
-        collection: "maintenance_requests",
-        title: "طلب صيانة جديد",
-        bodyTemplate: (it) =>
-          `تم تسجيل طلب صيانة جديد "${
-            it.title || "طلب صيانة"
-          }" للعميل ${it.customerName || "العميل"}`,
-      },
-      {
-        name: "maintenance_completed",
-        typeKey: "maintenance_notify_completed",
-        collection: "maintenance_requests",
-        title: "اكتمال صيانة",
-        bodyTemplate: (it) =>
-          `اكتملت أعمال الصيانة لطلب "${
-            it.title || "طلب صيانة"
-          }" للعميل ${it.customerName || "العميل"} وجاهز للتسليم`,
-      },
-    ];
-
-    for (const maintType of maintenanceTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db
-          .collectionGroup("maintenance_requests")
-          .limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const request = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              request.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const maintenanceSettings = settings.maintenance || {};
-            if (
-              !asBool(maintenanceSettings.maintenanceAlertsEnabled, true) ||
-              !asBool(maintenanceSettings.maintenanceAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (!asBool(maintenanceSettings[maintType.typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              maintType.typeKey,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(
-              request.scheduledDate || request.createdAt,
-            );
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${maintType.name}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`maintenance_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                maintType.typeKey,
-                maintType.title,
-                maintType.bodyTemplate(
-                  request.customerName || "العميل",
-                  request.title || "طلب صيانة",
-                ),
-                { type: maintType.typeKey, request_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: maintType.name,
-              requestId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(
-              `Failed maintenance ${doc.ref.path}:`,
-              error.message,
-            );
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 6. RENTALS ==========
-    const rentalTypes = [
-      {
-        name: "rental_expired",
-        typeKey: "rental_alert_expired",
-        collection: "rentals",
-        title: "تأجير متأخر",
-        bodyTemplate: (it) =>
-          `عقد تأجير ${it.customerName || "المستأجر"} متأخر عن موعد الإرجاع`,
-      },
-      {
-        name: "rental_expiring_soon",
-        typeKey: "rental_alert_expiring_soon",
-        collection: "rentals",
-        title: "تنبيه انتهاء تأجير",
-        bodyTemplate: (it) =>
-          `عقد تأجير ${it.customerName || "المستأجر"} سينتهي قريباً`,
-      },
-      {
-        name: "rental_new",
-        typeKey: "rental_notify_new",
-        collection: "rentals",
-        title: "عقد تأجير جديد",
-        bodyTemplate: (it) =>
-          `تم إبرام عقد تأجير جديد للمستأجر ${
-            it.customerName || "المستأجر"
-          }`,
-      },
-      {
-        name: "rental_returned",
-        typeKey: "rental_notify_returned",
-        collection: "rentals",
-        title: "إرجاع تأجير",
-        bodyTemplate: (it) =>
-          `تم تأكيد إرجاع المادة للمستأجر ${
-            it.customerName || "المستأجر"
-          } بنجاح`,
-      },
-    ];
-
-    for (const rentType of rentalTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db.collectionGroup("rentals").limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const rental = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              rental.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const rentalSettings = settings.rentals || {};
-            if (
-              !asBool(rentalSettings.rentalAlertsEnabled, true) ||
-              !asBool(rentalSettings.rentalAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (!asBool(rentalSettings[rentType.typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              rentType.typeKey,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(rental.endDate || rental.createdAt);
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${rentType.name}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`rental_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                rentType.typeKey,
-                rentType.title,
-                rentType.bodyTemplate(rental),
-                { type: rentType.typeKey, rental_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: rentType.name,
-              rentalId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(`Failed rental ${doc.ref.path}:`, error.message);
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    // ========== 7. EXPENSES ==========
-    const expenseTypes = [
-      {
-        name: "expense_pending",
-        typeKey: "expenses_alert_pending",
-        collection: "expenses",
-        title: "تنبيه مصروفات معلقة",
-        bodyTemplate: (it) =>
-          `المصروف "${it.title || "مصروف"}" بمبلغ ${
-            it.amount || 0
-          } د.ع بانتظار المراجعة والاعتماد`,
-      },
-      {
-        name: "expense_new",
-        typeKey: "expenses_notify_new",
-        collection: "expenses",
-        title: "تسجيل سند صرف",
-        bodyTemplate: (it) =>
-          `تم تسجيل مصروف جديد "${
-            it.title || "مصروف"
-          }" بمبلغ ${it.amount || 0} د.ع`,
-      },
-      {
-        name: "expense_overbudget",
-        typeKey: "expenses_alert_overbudget",
-        collection: "expenses",
-        title: "تجاوز الميزانية",
-        bodyTemplate: (it) =>
-          `فئة "${it.category || ""}" تجاوزت الميزانية بـ ${
-            it.exceeded || 0
-          } د.ع (الميزانية: ${it.budget || 0} د.ع)`,
-      },
-    ];
-
-    for (const expType of expenseTypes) {
-      lastDoc = null;
-      while (true) {
-        let query = db.collectionGroup("expenses").limit(FIRESTORE_PAGE_SIZE);
-        if (lastDoc) query = query.startAfter(lastDoc);
-        const page = await query.get();
-        if (page.empty) break;
-        lastDoc = page.docs[page.docs.length - 1];
-        grandTotals.scanned += page.size;
-
-        for (const doc of page.docs) {
-          try {
-            const expense = doc.data();
-            const orgEmail = normalizeOrganizationEmail(
-              expense.organizationEmail || "",
-            );
-            if (!orgEmail.includes("@")) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const settings = await readSettings(db, orgEmail);
-            const expenseSettings = settings.expenses || {};
-            if (
-              !asBool(expenseSettings.expensesAlertsEnabled, true) ||
-              !asBool(expenseSettings.expensesAlertPushEnabled, true)
-            ) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            if (!asBool(expenseSettings[expType.typeKey], true)) {
-              grandTotals.skipped++;
-              continue;
-            }
-
-            const { users, settingsById } = await readUsersAndSettings(
-              db,
-              orgEmail,
-            );
-            const recipients = eligiblePlayerIds(
-              users,
-              settingsById,
-              expType.typeKey,
-            );
-            if (recipients.size === 0) {
-              grandTotals.no_recipients++;
-              continue;
-            }
-
-            const dateField = toDate(expense.date || expense.createdAt);
-            const endKey = dateKey(dateField || today);
-            const eventKey = `${expType.name}_${keyHash(
-              `${doc.id}_${endKey}_${orgEmail}`,
-            )}`;
-            const marker = db
-              .collection(orgEmail)
-              .doc("system")
-              .collection("notificationSchedules")
-              .doc(`expense_${eventKey}`);
-            if ((await marker.get()).exists) {
-              grandTotals.duplicate++;
-              continue;
-            }
-
-            await sendOneSignal(
-              recipients,
-              makeNotification(
-                expType.typeKey,
-                expType.title,
-                expType.bodyTemplate(expense),
-                { type: expType.typeKey, expense_id: doc.id || "" },
-                orgEmail,
-              ),
-              apiKey,
-            );
-            await marker.set({
-              kind: expType.name,
-              expenseId: doc.id,
-              date: admin.firestore.Timestamp.fromDate(dateField || today),
-              organizationEmail: orgEmail,
-              recipientCount: recipients.size,
-              sentAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            grandTotals.sent++;
-          } catch (error) {
-            grandTotals.errors++;
-            console.error(`Failed expense ${doc.ref.path}:`, error.message);
-          }
-        }
-        if (page.size < FIRESTORE_PAGE_SIZE) break;
-      }
-    }
-
-    console.log("All notifications run:", JSON.stringify(grandTotals));
-    if (grandTotals.errors > 0) process.exitCode = 1;
   }
+
+  // ========== 3. CUSTOMERS ==========
+  const customerTypes = [
+    {
+      name: "customer_high_debt",
+      typeKey: "customer_alert_high_debt",
+      collection: "customers",
+      title: "تنبيه ديون عميل",
+      bodyTemplate: (it) =>
+        `العميل "${it.name || "العميل"}" عليه مستحقات مرتفعة بمبلغ ${
+          it.totalDebt || 0
+        } د.ع`,
+    },
+    {
+      name: "customer_credit_limit",
+      typeKey: "customer_alert_credit_limit",
+      collection: "customers",
+      title: "تجاوز حد الائتمان",
+      bodyTemplate: (it) =>
+        `العميل "${it.name || "العميل"}" تجاوز حد الائتمان (${
+          it.creditLimit || 0
+        }). إجمالي الدين: ${it.totalDebt || 0}`,
+    },
+    {
+      name: "customer_zero_balance",
+      typeKey: "customer_notify_zero_balance",
+      collection: "customers",
+      title: "تصفير حساب عميل",
+      bodyTemplate: (it) =>
+        `تم تسديد كامل ديون العميل "${it.name || "العميل"}" وأصبح رصيد حسابه 0.00 د.ع`,
+    },
+    {
+      name: "customer_new",
+      typeKey: "customer_notify_new",
+      collection: "customers",
+      title: "تسجيل عميل جديد",
+      bodyTemplate: (it) =>
+        `تمت إضافة العميل "${it.name || "العميل"}" بنجاح إلى سجل العملاء`,
+    },
+  ];
+
+  for (const custType of customerTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db.collectionGroup("customers").limit(FIRESTORE_PAGE_SIZE);
+      if (lastDoc) query = query.startAfter(lastDoc);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDoc = page.docs[page.docs.length - 1];
+      grandTotals.scanned += page.size;
+
+      for (const doc of page.docs) {
+        try {
+          const customer = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            customer.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const customerSettings = settings.customers || {};
+          if (
+            !asBool(customerSettings.customerAlertsEnabled, true) ||
+            !asBool(customerSettings.customerAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (!asBool(customerSettings[custType.typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            custType.typeKey,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(customer.createdAt || customer.updatedAt);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${custType.name}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`customer_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              custType.typeKey,
+              custType.title,
+              custType.bodyTemplate(customer),
+              { type: custType.typeKey, customer_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: custType.name,
+            customerId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed customer ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  // ========== 4. INVENTORY ==========
+  const inventoryTypes = [
+    {
+      name: "inventory_out_of_stock",
+      typeKey: "inventory_alert_out_of_stock",
+      collection: "products",
+      title: "نفاد كمية مادة",
+      bodyTemplate: (it) =>
+        `المادة "${it.name || "مادة"}" نفدت تماماً من المخزون!`,
+    },
+    {
+      name: "inventory_low_stock",
+      typeKey: "inventory_alert_low_stock",
+      collection: "products",
+      title: "تنبيه مخزون منخفض",
+      bodyTemplate: (it) =>
+        `المادة "${it.name || "مادة"}" متبقي منها كمية منخفضة من المخزون!`,
+    },
+    {
+      name: "inventory_new",
+      typeKey: "inventory_notify_new",
+      collection: "products",
+      title: "إضافة مادة جديدة",
+      bodyTemplate: (it) =>
+        `تمت إضافة المادة "${it.name || "مادة"}" إلى المخزون`,
+    },
+  ];
+
+  for (const invType of inventoryTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db.collectionGroup("products").limit(FIRESTORE_PAGE_SIZE);
+      if (lastDoc) query = query.startAfter(lastDoc);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDoc = page.docs[page.docs.length - 1];
+      grandTotals.scanned += page.size;
+
+      for (const doc of page.docs) {
+        try {
+          const product = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            product.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const inventorySettings = settings.inventory || {};
+          if (
+            !asBool(inventorySettings.inventoryAlertsEnabled, true) ||
+            !asBool(inventorySettings.inventoryAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (!asBool(inventorySettings[invType.typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            invType.typeKey,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(product.createdAt || product.updatedAt);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${invType.name}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`inventory_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              invType.typeKey,
+              invType.title,
+              invType.bodyTemplate(product.name || "مادة"),
+              { type: invType.typeKey, product_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: invType.name,
+            productId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed product ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  // ========== 5. MAINTENANCE ==========
+  const maintenanceTypes = [
+    {
+      name: "maintenance_overdue",
+      typeKey: "maintenance_alert_overdue",
+      collection: "maintenance_requests",
+      title: "صيانة متأخرة",
+      bodyTemplate: (it) =>
+        `طلب الصيانة "${it.title || "طلب صيانة"}" للعميل ${
+          it.customerName || "العميل"
+        } متأخر عن موعده المجدول`,
+    },
+    {
+      name: "maintenance_urgent",
+      typeKey: "maintenance_alert_urgent",
+      collection: "maintenance_requests",
+      title: "طلب صيانة عاجل",
+      bodyTemplate: (it) =>
+        `طلب الصيانة "${it.title || "طلب صيانة"}" للعميل ${
+          it.customerName || "العميل"
+        } بحالة عاجلة وبحاجة للمتابعة`,
+    },
+    {
+      name: "maintenance_new",
+      typeKey: "maintenance_notify_new",
+      collection: "maintenance_requests",
+      title: "طلب صيانة جديد",
+      bodyTemplate: (it) =>
+        `تم تسجيل طلب صيانة جديد "${
+          it.title || "طلب صيانة"
+        }" للعميل ${it.customerName || "العميل"}`,
+    },
+    {
+      name: "maintenance_completed",
+      typeKey: "maintenance_notify_completed",
+      collection: "maintenance_requests",
+      title: "اكتمال صيانة",
+      bodyTemplate: (it) =>
+        `اكتملت أعمال الصيانة لطلب "${
+          it.title || "طلب صيانة"
+        }" للعميل ${it.customerName || "العميل"} وجاهز للتسليم`,
+    },
+  ];
+
+  for (const maintType of maintenanceTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db
+        .collectionGroup("maintenance_requests")
+        .limit(FIRESTORE_PAGE_SIZE);
+      if (lastDoc) query = query.startAfter(lastDoc);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDoc = page.docs[page.docs.length - 1];
+      grandTotals.scanned += page.size;
+
+      for (const doc of page.docs) {
+        try {
+          const request = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            request.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const maintenanceSettings = settings.maintenance || {};
+          if (
+            !asBool(maintenanceSettings.maintenanceAlertsEnabled, true) ||
+            !asBool(maintenanceSettings.maintenanceAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (!asBool(maintenanceSettings[maintType.typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            maintType.typeKey,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(request.scheduledDate || request.createdAt);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${maintType.name}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`maintenance_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              maintType.typeKey,
+              maintType.title,
+              maintType.bodyTemplate(
+                request.customerName || "العميل",
+                request.title || "طلب صيانة",
+              ),
+              { type: maintType.typeKey, request_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: maintType.name,
+            requestId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed maintenance ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  // ========== 6. RENTALS ==========
+  const rentalTypes = [
+    {
+      name: "rental_expired",
+      typeKey: "rental_alert_expired",
+      collection: "rentals",
+      title: "تأجير متأخر",
+      bodyTemplate: (it) =>
+        `عقد تأجير ${it.customerName || "المستأجر"} متأخر عن موعد الإرجاع`,
+    },
+    {
+      name: "rental_expiring_soon",
+      typeKey: "rental_alert_expiring_soon",
+      collection: "rentals",
+      title: "تنبيه انتهاء تأجير",
+      bodyTemplate: (it) =>
+        `عقد تأجير ${it.customerName || "المستأجر"} سينتهي قريباً`,
+    },
+    {
+      name: "rental_new",
+      typeKey: "rental_notify_new",
+      collection: "rentals",
+      title: "عقد تأجير جديد",
+      bodyTemplate: (it) =>
+        `تم إبرام عقد تأجير جديد للمستأجر ${it.customerName || "المستأجر"}`,
+    },
+    {
+      name: "rental_returned",
+      typeKey: "rental_notify_returned",
+      collection: "rentals",
+      title: "إرجاع تأجير",
+      bodyTemplate: (it) =>
+        `تم تأكيد إرجاع المادة للمستأجر ${it.customerName || "المستأجر"} بنجاح`,
+    },
+  ];
+
+  for (const rentType of rentalTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db.collectionGroup("rentals").limit(FIRESTORE_PAGE_SIZE);
+      if (lastDoc) query = query.startAfter(lastDoc);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDoc = page.docs[page.docs.length - 1];
+      grandTotals.scanned += page.size;
+
+      for (const doc of page.docs) {
+        try {
+          const rental = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            rental.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const rentalSettings = settings.rentals || {};
+          if (
+            !asBool(rentalSettings.rentalAlertsEnabled, true) ||
+            !asBool(rentalSettings.rentalAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (!asBool(rentalSettings[rentType.typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            rentType.typeKey,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(rental.endDate || rental.createdAt);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${rentType.name}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`rental_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              rentType.typeKey,
+              rentType.title,
+              rentType.bodyTemplate(rental),
+              { type: rentType.typeKey, rental_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: rentType.name,
+            rentalId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed rental ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  // ========== 7. EXPENSES ==========
+  const expenseTypes = [
+    {
+      name: "expense_pending",
+      typeKey: "expenses_alert_pending",
+      collection: "expenses",
+      title: "تنبيه مصروفات معلقة",
+      bodyTemplate: (it) =>
+        `المصروف "${it.title || "مصروف"}" بمبلغ ${
+          it.amount || 0
+        } د.ع بانتظار المراجعة والاعتماد`,
+    },
+    {
+      name: "expense_new",
+      typeKey: "expenses_notify_new",
+      collection: "expenses",
+      title: "تسجيل سند صرف",
+      bodyTemplate: (it) =>
+        `تم تسجيل مصروف جديد "${
+          it.title || "مصروف"
+        }" بمبلغ ${it.amount || 0} د.ع`,
+    },
+    {
+      name: "expense_overbudget",
+      typeKey: "expenses_alert_overbudget",
+      collection: "expenses",
+      title: "تجاوز الميزانية",
+      bodyTemplate: (it) =>
+        `فئة "${it.category || ""}" تجاوزت الميزانية بـ ${
+          it.exceeded || 0
+        } د.ع (الميزانية: ${it.budget || 0} د.ع)`,
+    },
+  ];
+
+  for (const expType of expenseTypes) {
+    lastDoc = null;
+    while (true) {
+      let query = db.collectionGroup("expenses").limit(FIRESTORE_PAGE_SIZE);
+      if (lastDoc) query = query.startAfter(lastDoc);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDoc = page.docs[page.docs.length - 1];
+      grandTotals.scanned += page.size;
+
+      for (const doc of page.docs) {
+        try {
+          const expense = doc.data();
+          const orgEmail = normalizeOrganizationEmail(
+            expense.organizationEmail || "",
+          );
+          if (!orgEmail.includes("@")) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const settings = await readSettings(db, orgEmail);
+          const expenseSettings = settings.expenses || {};
+          if (
+            !asBool(expenseSettings.expensesAlertsEnabled, true) ||
+            !asBool(expenseSettings.expensesAlertPushEnabled, true)
+          ) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          if (!asBool(expenseSettings[expType.typeKey], true)) {
+            grandTotals.skipped++;
+            continue;
+          }
+
+          const { users, settingsById } = await readUsersAndSettings(
+            db,
+            orgEmail,
+          );
+          const recipients = eligiblePlayerIds(
+            users,
+            settingsById,
+            expType.typeKey,
+          );
+          if (recipients.size === 0) {
+            grandTotals.no_recipients++;
+            continue;
+          }
+
+          const dateField = toDate(expense.date || expense.createdAt);
+          const endKey = dateKey(dateField || today);
+          const eventKey = `${expType.name}_${keyHash(
+            `${doc.id}_${endKey}_${orgEmail}`,
+          )}`;
+          const marker = db
+            .collection(orgEmail)
+            .doc("system")
+            .collection("notificationSchedules")
+            .doc(`expense_${eventKey}`);
+          if ((await marker.get()).exists) {
+            grandTotals.duplicate++;
+            continue;
+          }
+
+          await sendOneSignal(
+            recipients,
+            makeNotification(
+              expType.typeKey,
+              expType.title,
+              expType.bodyTemplate(expense),
+              { type: expType.typeKey, expense_id: doc.id || "" },
+              orgEmail,
+            ),
+            apiKey,
+          );
+          await marker.set({
+            kind: expType.name,
+            expenseId: doc.id,
+            date: admin.firestore.Timestamp.fromDate(dateField || today),
+            organizationEmail: orgEmail,
+            recipientCount: recipients.size,
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          grandTotals.sent++;
+        } catch (error) {
+          grandTotals.errors++;
+          console.error(`Failed expense ${doc.ref.path}:`, error.message);
+        }
+      }
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  console.log("All notifications run:", JSON.stringify(grandTotals));
+  if (grandTotals.errors > 0) process.exitCode = 1;
 }
 
 if (require.main === module) {

@@ -3,6 +3,11 @@ const crypto = require("node:crypto");
 
 const ONESIGNAL_APP_ID = "e309b00d-2d36-4285-ac55-f7b5831d731d";
 const FIRESTORE_PAGE_SIZE = 3;
+const MAX_WARNING_DAYS = 7;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function normalizeOrganizationEmail(email) {
   if (typeof email !== "string") return "";
@@ -101,7 +106,7 @@ async function readUsersAndSettings(db, organizationEmail) {
     settingsDocs.forEach((settingsDoc, offset) => {
       if (settingsDoc.exists) settingsById.set(userBatch[offset].id, settingsDoc.data());
     });
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await sleep(2000);
   }
   return { users, settingsById };
 }
@@ -123,92 +128,8 @@ async function sendOneSignal(ids, notification, apiKey) {
         android_priority: 10,
       }),
     });
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
-}
-
-async function run() {
-  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
-  if (!apiKey) {
-    console.error("ONESIGNAL_REST_API_KEY environment variable is not set.");
-    process.exitCode = 1;
-    return;
-  }
-  if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.applicationDefault() });
-  const db = admin.firestore();
-  const today = new Date();
-
-  let grandTotals = { scanned: 0, sent: 0, skipped: 0, no_recipients: 0, duplicate: 0, errors: 0 };
-
-  // Get unique organization emails from subscriptions
-  const orgEmails = new Set();
-  let lastDocument = null;
-  while (true) {
-    let query = db.collectionGroup("subscriptions").limit(5);
-    if (lastDocument) query = query.startAfter(lastDocument);
-    const page = await query.get();
-    if (page.empty) break;
-    lastDocument = page.docs[page.docs.length - 1];
-    for (const doc of page.docs) {
-      const sub = doc.data();
-      const oe = normalizeOrganizationEmail(sub.organizationEmail || "");
-      if (oe.includes("@")) orgEmails.add(oe);
-    }
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    if (page.size < FIRESTORE_PAGE_SIZE) break;
-  }
-
-  for (const orgEmail of orgEmails) {
-    await sleep(30000);
-    const settings = await readSettings(db, orgEmail);
-    const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
-    
-    let lastDocument = null;
-    while (true) {
-      await sleep(1000);
-      let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
-      if (lastDocument) query = query.startAfter(lastDocument);
-      const page = await query.get();
-      if (page.empty) break;
-      lastDocument = page.docs[page.docs.length - 1];
-      
-      for (const doc of page.docs) {
-        const item = doc.data();
-        if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
-        try {
-          const endDate = toDate(item.endDate);
-          if (!endDate || ["cancelled", "suspended", "pending"].includes(item.status)) continue;
-          const daysRemaining = Math.round((utcDay(endDate) - utcDay(today)) / 86400000);
-          if (daysRemaining < 0) {
-            await sendOneSignal(
-              await getPlayerIds(db, orgEmail, "subscription_alert_expired"),
-              {
-                title: "انتهى الاشتراك",
-                body: `انتهى اشتراك ${item.customerName || "المشترك"} (${item.name || ""}). يرجى مراجعة التجديد.`,
-                data: { type: "subscription_alert_expired", subscription_id: doc.id || "", organization_email: orgEmail },
-              },
-              apiKey
-            );
-          } else if (item.status === "active" && daysRemaining <= MAX_WARNING_DAYS) {
-            await sendOneSignal(
-              await getPlayerIds(db, orgEmail, "subscription_alert_expiring_soon"),
-              {
-                title: "تذكير بانتهاء الاشتراك",
-                body: `باقي ${daysRemaining} يوم على انتهاء اشتراك ${item.customerName || "المشترك"} (${item.name || ""}).`,
-                data: { type: "subscription_alert_expiring_soon", subscription_id: doc.id || "", organization_email: orgEmail },
-              },
-              apiKey
-            );
-          }
-        } catch (error) {
-          console.error(`Failed subscription ${doc.ref.path}:`, error.message);
-        }
-      }
-      if (page.size < FIRESTORE_PAGE_SIZE) break;
-    }
-  }
-
-  console.log("All notifications run completed");
 }
 
 async function getPlayerIds(db, orgEmail, typeKey) {
@@ -258,7 +179,7 @@ async function run() {
       const oe = normalizeOrganizationEmail(sub.organizationEmail || "");
       if (oe.includes("@")) orgEmails.add(oe);
     }
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await sleep(5000);
     if (page.size < FIRESTORE_PAGE_SIZE) break;
   }
 
@@ -329,5 +250,4 @@ module.exports = {
   dateKey,
   asBool,
   eligiblePlayerIds,
-  makeNotification,
 };

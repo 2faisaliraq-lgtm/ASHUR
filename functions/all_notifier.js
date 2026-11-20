@@ -214,7 +214,6 @@ module.exports = {
   normalizeOrganizationEmail,
   toDate,
   utcDay,
-  dateKey,
   asBool,
   eligiblePlayerIds,
 };

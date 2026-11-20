@@ -2,7 +2,7 @@ const admin = require("firebase-admin");
 const crypto = require("node:crypto");
 
 const ONESIGNAL_APP_ID = "e309b00d-2d36-4285-ac55-f7b5831d731d";
-const FIRESTORE_PAGE_SIZE = 5;
+const FIRESTORE_PAGE_SIZE = 3;
 
 function normalizeOrganizationEmail(email) {
   if (typeof email !== "string") return "";

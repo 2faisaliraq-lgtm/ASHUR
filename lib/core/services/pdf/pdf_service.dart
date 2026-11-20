@@ -1034,9 +1034,35 @@ class PdfService {
             ?.toDouble() ??
         0.0;
 
-    final grandTotal = invoices.fold<double>(
+    // حساب المجاميع الإجمالية - موجبة وسالبة بشكل منفصل مع صافي نهائي
+    // المنطق مطابق لشاشة قائمة الفواتير: تصنيف حسب نوع الفاتورة
+    final grandTotalPositive = invoices.fold<double>(
       0,
-      (sum, inv) => sum + inv.totalAmount,
+      (sum, inv) {
+        final isSalesReturn = inv.type == 'sales_return' || inv.isSalesReturn;
+        final isCashReceipt = inv.type == 'cash' &&
+            inv.isCashAccountReceipt &&
+            inv.effectiveCashTransactionType == 'receipt';
+        if (isSalesReturn || isCashReceipt) {
+          return sum; // سالبة - لا تضاف للموجبة
+        } else {
+          return sum + inv.totalAmount; // موجبة (تزيد الدين)
+        }
+      },
+    );
+    final grandTotalNegative = invoices.fold<double>(
+      0,
+      (sum, inv) {
+        final isSalesReturn = inv.type == 'sales_return' || inv.isSalesReturn;
+        final isCashReceipt = inv.type == 'cash' &&
+            inv.isCashAccountReceipt &&
+            inv.effectiveCashTransactionType == 'receipt';
+        if (isSalesReturn || isCashReceipt) {
+          return sum + inv.totalAmount.abs(); // سالبة (تقلل الدين)
+        } else {
+          return sum; // موجبة - لا تضاف للسالبة
+        }
+      },
     );
     final grandPaid = invoices.fold<double>(
       0,
@@ -1344,31 +1370,43 @@ class PdfService {
             ),
             child: pw.Column(
                children: [
-                  // حساب الدين efekt لكل حقل بشكل منفصل
-                  _buildTotalRow(
-                    _ar('الإجمالي الكلي:'),
-                    grandTotal,
-                    fontSize: bodyFontSize,
-                    isBold: true,
-                    debtEffect: grandTotal > 0 ? 'increase' : 'decrease',
-                  ),
-                  pw.SizedBox(height: 4),
-                  _buildTotalRow(
-                    _ar('المدفوع:'),
-                    grandPaid,
-                    fontSize: bodyFontSize,
-                    debtEffect: 'decrease',
-                  ),
-                  pw.SizedBox(height: 4),
-                  _buildTotalRow(
-                    _ar('المتبقي:'),
-                    grandRemaining,
-                    fontSize: bodyFontSize,
-                    isBold: true,
-                    debtEffect: grandRemaining > 0 ? 'increase' : 'decrease',
-                  ),
-              ],
-            ),
+                 // قيمة الفواتير (الموجبة - تزيد الدين) - أحمر
+                 _buildTotalRow(
+                   _ar('قيمة الفواتير:'),
+                   grandTotalPositive,
+                   fontSize: bodyFontSize,
+                   isBold: true,
+                   debtEffect: 'increase',
+                 ),
+                 pw.SizedBox(height: 4),
+                 // المبالغ المدفوعة - أخضر
+                 _buildTotalRow(
+                   _ar('المبالغ المدفوعة:'),
+                   grandPaid,
+                   fontSize: bodyFontSize,
+                   debtEffect: 'decrease',
+                 ),
+                 pw.SizedBox(height: 4),
+                 // مرجع البيع - أخضر (إذا وجد)
+                 if (grandTotalNegative > 0) ...[
+                   _buildTotalRow(
+                     _ar('مرجع البيع:'),
+                     grandTotalNegative,
+                     fontSize: bodyFontSize,
+                     debtEffect: 'decrease',
+                   ),
+                   pw.SizedBox(height: 4),
+                 ],
+                 // المتبقي
+                 _buildTotalRow(
+                   _ar('المتبقي:'),
+                   grandRemaining,
+                   fontSize: bodyFontSize,
+                   isBold: true,
+                   debtEffect: grandRemaining > 0 ? 'increase' : 'decrease',
+                 ),
+               ],
+             ),
           ),
           pw.SizedBox(height: 15),
            pw.Text(

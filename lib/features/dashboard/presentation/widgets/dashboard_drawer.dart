@@ -372,10 +372,7 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
     );
 
     if (shouldLogout == true && context.mounted) {
-      debugPrint('[LOGOUT] dispatching SignOutRequested');
       context.read<AuthBloc>().add(SignOutRequested());
-    } else {
-      debugPrint('[LOGOUT] cancelled: shouldLogout=$shouldLogout, mounted=${context.mounted}');
     }
   }
 }

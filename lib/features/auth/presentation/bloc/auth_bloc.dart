@@ -611,9 +611,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     SignOutRequested event,
     Emitter<AuthState> emit,
   ) async {
-    print('[LOGOUT] _onSignOutRequested started');
     emit(AuthLoading());
-    print('[LOGOUT] AuthLoading emitted');
     try {
       try {
         await PushNotificationService.unregisterCurrentUserToken();
@@ -628,21 +626,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         SessionService.clearAll(),
         AuthNavigationService.clearFirstLoginState(),
       ]);
-      print('[LOGOUT] Session cleared');
 
       // إغلاق الـ Stream وتنظيف الموارد لتجنب تسرب الذاكرة
       SessionService.dispose();
-      print('[LOGOUT] Session disposed');
 
       final result = await signOutUseCase();
-      print('[LOGOUT] signOutUseCase completed');
       result.fold(
         (failure) => emit(AuthError(message: failure.message)),
         (_) => emit(AuthUnauthenticated()),
       );
-      print('[LOGOUT] AuthUnauthenticated emitted');
-    } catch (e, s) {
-      print('[LOGOUT] Caught error: $e\n$s');
+    // ignore: avoid_catches_without_on_clauses
+    } catch (e) {
       emit(AuthError(message: 'حدث خطأ غير متوقع'));
     }
   }

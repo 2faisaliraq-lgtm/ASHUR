@@ -324,9 +324,23 @@ async function processCollection({
 async function run() {
   const apiKey = process.env.ONESIGNAL_REST_API_KEY;
   if (!apiKey) {
-    throw new Error("Set ONESIGNAL_REST_API_KEY in the cron environment.");
+    console.error("ONESIGNAL_REST_API_KEY environment variable is not set.");
+    console.error("Please add it to GitHub Actions secrets.");
+    process.exitCode = 1;
+    return;
   }
-  if (!admin.apps.length) admin.initializeApp();
+  if (!admin.apps.length) {
+    try {
+      admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+      });
+    } catch (err) {
+      console.error("Failed to initialize Firebase Admin:", err.message);
+      console.error("Make sure GOOGLE_APPLICATION_CREDENTIALS is set or running on Google Cloud.");
+      process.exitCode = 1;
+      return;
+    }
+  }
   const db = admin.firestore();
   const today = new Date();
 

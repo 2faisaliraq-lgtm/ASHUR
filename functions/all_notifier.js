@@ -3,8 +3,8 @@ const crypto = require("node:crypto");
 
 const ONESIGNAL_APP_ID = "e309b00d-2d36-4285-ac55-f7b5831d731d";
 const MAX_WARNING_DAYS = 30;
-const FIRESTORE_PAGE_SIZE = 400;
-const FIRESTORE_READ_BATCH_SIZE = 400;
+const FIRESTORE_PAGE_SIZE = 50;
+const FIRESTORE_READ_BATCH_SIZE = 50;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -242,6 +242,7 @@ async function processCollection({
 
   let lastDocument = null;
   while (true) {
+    await sleep(1000);
     let query = db.collectionGroup(collectionName).limit(FIRESTORE_PAGE_SIZE);
     if (lastDocument) query = query.startAfter(lastDocument);
     const page = await query.get();
@@ -412,6 +413,7 @@ async function run() {
   const orgEmails = new Set();
   let lastDoc = null;
   while (true) {
+    await sleep(1000);
     let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
     if (lastDoc) query = query.startAfter(lastDoc);
     const page = await query.get();
@@ -431,6 +433,7 @@ async function run() {
     const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
     let lastDocument = null;
     while (true) {
+    await sleep(1000);
       let query = db
         .collectionGroup("subscriptions")
         .limit(FIRESTORE_PAGE_SIZE);
@@ -541,6 +544,7 @@ async function run() {
   for (const invType of invoiceTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db.collectionGroup("invoices").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();
@@ -686,6 +690,7 @@ async function run() {
   for (const custType of customerTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db.collectionGroup("customers").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();
@@ -808,6 +813,7 @@ async function run() {
   for (const invType of inventoryTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db.collectionGroup("products").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();
@@ -946,6 +952,7 @@ async function run() {
   for (const maintType of maintenanceTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db
         .collectionGroup("maintenance_requests")
         .limit(FIRESTORE_PAGE_SIZE);
@@ -1081,6 +1088,7 @@ async function run() {
   for (const rentType of rentalTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db.collectionGroup("rentals").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();
@@ -1209,6 +1217,7 @@ async function run() {
   for (const expType of expenseTypes) {
     lastDoc = null;
     while (true) {
+    await sleep(1000);
       let query = db.collectionGroup("expenses").limit(FIRESTORE_PAGE_SIZE);
       if (lastDoc) query = query.startAfter(lastDoc);
       const page = await query.get();

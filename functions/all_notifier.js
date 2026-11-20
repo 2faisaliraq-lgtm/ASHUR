@@ -2,7 +2,7 @@ const admin = require("firebase-admin");
 const crypto = require("node:crypto");
 
 const ONESIGNAL_APP_ID = "e309b00d-2d36-4285-ac55-f7b5831d731d";
-const FIRESTORE_PAGE_SIZE = 3;
+const FIRESTORE_PAGE_SIZE = 10;
 const MAX_WARNING_DAYS = 7;
 
 function sleep(ms) {
@@ -50,11 +50,6 @@ function utcDay(date) {
   return Date.UTC(year, month - 1, day);
 }
 
-function dateKey(date) {
-  const { year, month, day } = baghdadDateParts(date);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
 function asBool(value, fallback = false) {
   if (value === undefined || value === null) return fallback;
   return value === true || String(value).toLowerCase() === "true";
@@ -79,38 +74,6 @@ function eligiblePlayerIds(users, userSettingsById, typeKey) {
   return ids;
 }
 
-function keyHash(value) {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-async function readSettings(db, organizationEmail) {
-  const snapshot = await db.collection(organizationEmail).doc("settings").collection("settings").get();
-  const categories = {};
-  for (const doc of snapshot.docs) {
-    const setting = doc.data();
-    if (!setting.category || !setting.key) continue;
-    categories[setting.category] = categories[setting.category] || {};
-    categories[setting.category][setting.key] = setting.value;
-  }
-  return categories;
-}
-
-async function readUsersAndSettings(db, organizationEmail) {
-  const snapshot = await db.collection(organizationEmail).doc("users").collection("users").get();
-  const users = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() }));
-  const settingsById = new Map();
-  const usersCollection = db.collection(organizationEmail).doc("users").collection("users");
-  for (let index = 0; index < users.length; index += 5) {
-    const userBatch = users.slice(index, index + 5);
-    const settingsDocs = await Promise.all(userBatch.map((user) => usersCollection.doc(user.id).collection("notification_settings").doc("settings").get()));
-    settingsDocs.forEach((settingsDoc, offset) => {
-      if (settingsDoc.exists) settingsById.set(userBatch[offset].id, settingsDoc.data());
-    });
-    await sleep(2000);
-  }
-  return { users, settingsById };
-}
-
 async function sendOneSignal(ids, notification, apiKey) {
   const allIds = Array.from(ids);
   if (allIds.length === 0) return;
@@ -132,25 +95,32 @@ async function sendOneSignal(ids, notification, apiKey) {
   }
 }
 
-async function getPlayerIds(db, orgEmail, typeKey) {
-  const ids = new Set();
+const userSettingsCache = new Map();
+
+async function readUsersAndSettings(db, organizationEmail) {
+  const cached = userSettingsCache.get(organizationEmail);
+  if (cached) return cached;
+
   const snapshot = await db.collection(organizationEmail).doc("users").collection("users").get();
-  for (const doc of snapshot.docs) {
-    const data = doc.data() || {};
-    if (data.isActive === false || data.notificationEnabled === false) continue;
-    const settingsDoc = await db.collection(organizationEmail).doc("users").collection("users").doc(doc.id).collection("notification_settings").doc("settings").get();
-    const settings = settingsDoc.exists ? settingsDoc.data() || {} : {};
-    if (!asBool(settings.enableNotifications, false) || !asBool(settings.enablePushNotifications, false)) continue;
-    if (!asBool(settings[typeKey], false)) continue;
-    const single = data.oneSignalPlayerId;
-    if (typeof single === "string" && single.trim()) ids.add(single.trim());
-    if (Array.isArray(data.oneSignalPlayerIds)) {
-      for (const id of data.oneSignalPlayerIds) {
-        if (typeof id === "string" && id.trim()) ids.add(id.trim());
-      }
-    }
+  const users = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() }));
+  const settingsById = new Map();
+  const usersCollection = db.collection(organizationEmail).doc("users").collection("users");
+  for (let index = 0; index < users.length; index += 10) {
+    const userBatch = users.slice(index, index + 10);
+    const settingsDocs = await Promise.all(userBatch.map((user) => usersCollection.doc(user.id).collection("notification_settings").doc("settings").get()));
+    settingsDocs.forEach((settingsDoc, offset) => {
+      if (settingsDoc.exists) settingsById.set(userBatch[offset].id, settingsDoc.data());
+    });
+    await sleep(1000);
   }
-  return ids;
+  const result = { users, settingsById };
+  userSettingsCache.set(organizationEmail, result);
+  return result;
+}
+
+async function getPlayerIds(db, orgEmail, typeKey) {
+  const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
+  return eligiblePlayerIds(users, settingsById, typeKey);
 }
 
 async function run() {
@@ -167,73 +137,70 @@ async function run() {
   let grandTotals = { scanned: 0, sent: 0, skipped: 0, no_recipients: 0, duplicate: 0, errors: 0 };
 
   const orgEmails = new Set();
+  const orgSubscriptions = new Map();
+
   let lastDocument = null;
   while (true) {
-    let query = db.collectionGroup("subscriptions").limit(5);
+    let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
     if (lastDocument) query = query.startAfter(lastDocument);
     const page = await query.get();
     if (page.empty) break;
     lastDocument = page.docs[page.docs.length - 1];
+
     for (const doc of page.docs) {
-      const sub = doc.data();
-      const oe = normalizeOrganizationEmail(sub.organizationEmail || "");
-      if (oe.includes("@")) orgEmails.add(oe);
+      const item = doc.data();
+      const oe = normalizeOrganizationEmail(item.organizationEmail || "");
+      if (!oe.includes("@")) continue;
+
+      orgEmails.add(oe);
+      if (!orgSubscriptions.has(oe)) orgSubscriptions.set(oe, []);
+      orgSubscriptions.get(oe).push({ doc, item });
     }
-    await sleep(5000);
+
+    await sleep(1000);
     if (page.size < FIRESTORE_PAGE_SIZE) break;
   }
 
   for (const orgEmail of orgEmails) {
-    await sleep(30000);
-    const settings = await readSettings(db, orgEmail);
+    await sleep(5000);
+    const subs = orgSubscriptions.get(orgEmail) || [];
     const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
-    
-    let lastDocument = null;
-    while (true) {
-      await sleep(1000);
-      let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
-      if (lastDocument) query = query.startAfter(lastDocument);
-      const page = await query.get();
-      if (page.empty) break;
-      lastDocument = page.docs[page.docs.length - 1];
-      
-      for (const doc of page.docs) {
-        const item = doc.data();
-        if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
-        try {
-          const endDate = toDate(item.endDate);
-          if (!endDate || ["cancelled", "suspended", "pending"].includes(item.status)) continue;
-          const daysRemaining = Math.round((utcDay(endDate) - utcDay(today)) / 86400000);
-          if (daysRemaining < 0) {
-            await sendOneSignal(
-              await getPlayerIds(db, orgEmail, "subscription_alert_expired"),
-              {
-                title: "انتهى الاشتراك",
-                body: `انتهى اشتراك ${item.customerName || "المشترك"} (${item.name || ""}). يرجى مراجعة التجديد.`,
-                data: { type: "subscription_alert_expired", subscription_id: doc.id || "", organization_email: orgEmail },
-              },
-              apiKey
-            );
-          } else if (item.status === "active" && daysRemaining <= MAX_WARNING_DAYS) {
-            await sendOneSignal(
-              await getPlayerIds(db, orgEmail, "subscription_alert_expiring_soon"),
-              {
-                title: "تذكير بانتهاء الاشتراك",
-                body: `باقي ${daysRemaining} يوم على انتهاء اشتراك ${item.customerName || "المشترك"} (${item.name || ""}).`,
-                data: { type: "subscription_alert_expiring_soon", subscription_id: doc.id || "", organization_email: orgEmail },
-              },
-              apiKey
-            );
-          }
-        } catch (error) {
-          console.error(`Failed subscription ${doc.ref.path}:`, error.message);
+
+    for (const { doc, item } of subs) {
+      try {
+        const endDate = toDate(item.endDate);
+        if (!endDate || ["cancelled", "suspended", "pending"].includes(item.status)) continue;
+        const daysRemaining = Math.round((utcDay(endDate) - utcDay(today)) / 86400000);
+        if (daysRemaining < 0) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "subscription_alert_expired"),
+            {
+              title: "انتهى الاشتراك",
+              body: `انتهى اشتراك ${item.customerName || "المشترك"} (${item.name || ""}). يرجى مراجعة التجديد.`,
+              data: { type: "subscription_alert_expired", subscription_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        } else if (item.status === "active" && daysRemaining <= MAX_WARNING_DAYS) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "subscription_alert_expiring_soon"),
+            {
+              title: "تذكير بانتهاء الاشتراك",
+              body: `باقي ${daysRemaining} يوم على انتهاء اشتراك ${item.customerName || "المشترك"} (${item.name || ""}).`,
+              data: { type: "subscription_alert_expiring_soon", subscription_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
         }
+        grandTotals.scanned++;
+      } catch (error) {
+        console.error(`Failed subscription ${doc.ref.path}:`, error.message);
+        grandTotals.errors++;
       }
-      if (page.size < FIRESTORE_PAGE_SIZE) break;
     }
   }
 
-  console.log("All notifications run completed");
+  console.log("All notifications run completed", grandTotals);
 }
 
 if (require.main === module) {

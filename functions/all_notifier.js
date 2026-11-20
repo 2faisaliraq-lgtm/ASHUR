@@ -429,7 +429,7 @@ async function run() {
   }
 
   for (const orgEmail of orgEmails) {
-    await sleep(10000);
+    await sleep(30000);
     const settings = await readSettings(db, orgEmail);
     const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
     let lastDocument = null;

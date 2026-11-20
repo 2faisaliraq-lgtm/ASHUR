@@ -6,6 +6,10 @@ const MAX_WARNING_DAYS = 30;
 const FIRESTORE_PAGE_SIZE = 400;
 const FIRESTORE_READ_BATCH_SIZE = 400;
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function normalizeOrganizationEmail(email) {
   if (typeof email !== "string") return "";
   const parts = email.trim().toLowerCase().split("@");

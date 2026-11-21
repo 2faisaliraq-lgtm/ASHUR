@@ -123,22 +123,7 @@ async function getPlayerIds(db, orgEmail, typeKey) {
   return eligiblePlayerIds(users, settingsById, typeKey);
 }
 
-async function run() {
-  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
-  if (!apiKey) {
-    console.error("ONESIGNAL_REST_API_KEY environment variable is not set.");
-    process.exitCode = 1;
-    return;
-  }
-  if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.applicationDefault() });
-  const db = admin.firestore();
-  const today = new Date();
-
-  let grandTotals = { scanned: 0, sent: 0, skipped: 0, no_recipients: 0, duplicate: 0, errors: 0 };
-
-  const orgEmails = new Set();
-  const orgSubscriptions = new Map();
-
+async function processSubscriptions(db, orgEmail, users, settingsById, apiKey, totals) {
   let lastDocument = null;
   while (true) {
     let query = db.collectionGroup("subscriptions").limit(FIRESTORE_PAGE_SIZE);
@@ -149,28 +134,11 @@ async function run() {
 
     for (const doc of page.docs) {
       const item = doc.data();
-      const oe = normalizeOrganizationEmail(item.organizationEmail || "");
-      if (!oe.includes("@")) continue;
-
-      orgEmails.add(oe);
-      if (!orgSubscriptions.has(oe)) orgSubscriptions.set(oe, []);
-      orgSubscriptions.get(oe).push({ doc, item });
-    }
-
-    await sleep(1000);
-    if (page.size < FIRESTORE_PAGE_SIZE) break;
-  }
-
-  for (const orgEmail of orgEmails) {
-    await sleep(5000);
-    const subs = orgSubscriptions.get(orgEmail) || [];
-    const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
-
-    for (const { doc, item } of subs) {
+      if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
       try {
         const endDate = toDate(item.endDate);
         if (!endDate || ["cancelled", "suspended", "pending"].includes(item.status)) continue;
-        const daysRemaining = Math.round((utcDay(endDate) - utcDay(today)) / 86400000);
+        const daysRemaining = Math.round((utcDay(endDate) - utcDay(new Date())) / 86400000);
         if (daysRemaining < 0) {
           await sendOneSignal(
             eligiblePlayerIds(users, settingsById, "subscription_alert_expired"),
@@ -192,12 +160,263 @@ async function run() {
             apiKey
           );
         }
-        grandTotals.scanned++;
+        totals.scanned++;
       } catch (error) {
         console.error(`Failed subscription ${doc.ref.path}:`, error.message);
-        grandTotals.errors++;
+        totals.errors++;
       }
     }
+    await sleep(1000);
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+}
+
+async function processCustomers(db, orgEmail, users, settingsById, apiKey, totals) {
+  let lastDocument = null;
+  while (true) {
+    let query = db.collectionGroup("customers").limit(FIRESTORE_PAGE_SIZE);
+    if (lastDocument) query = query.startAfter(lastDocument);
+    const page = await query.get();
+    if (page.empty) break;
+    lastDocument = page.docs[page.docs.length - 1];
+
+    for (const doc of page.docs) {
+      const item = doc.data();
+      if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
+      try {
+        const creditLimit = item.creditLimit;
+        const totalDebt = item.totalDebt || 0;
+        if (totalDebt > 0 && creditLimit != null && creditLimit > 0 && totalDebt > creditLimit) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "customer_alert_high_debt"),
+            {
+              title: "تجاوز حد الائتمان",
+              body: `العميل "${item.name || item.customerName || ""}" تجاوز حد الائتمان (${creditLimit}). إجمالي الدين: ${totalDebt.toFixed(0)} د.ع`,
+              data: { type: "customer_alert_high_debt", customer_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        } else if (totalDebt > 0) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "customer_alert_high_debt"),
+            {
+              title: "ديون عميل مرتفعة",
+              body: `العميل "${item.name || item.customerName || ""}" عليه ديون بقيمة ${totalDebt.toFixed(0)} د.ع`,
+              data: { type: "customer_alert_high_debt", customer_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        }
+        totals.scanned++;
+      } catch (error) {
+        console.error(`Failed customer ${doc.ref.path}:`, error.message);
+        totals.errors++;
+      }
+    }
+    await sleep(1000);
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+}
+
+async function processMaintenance(db, orgEmail, users, settingsById, apiKey, totals) {
+  let lastDocument = null;
+  while (true) {
+    let query = db.collectionGroup("maintenance").limit(FIRESTORE_PAGE_SIZE);
+    if (lastDocument) query = query.startAfter(lastDocument);
+    const page = await query.get();
+    if (page.empty) break;
+    lastDocument = page.docs[page.docs.length - 1];
+
+    for (const doc of page.docs) {
+      const item = doc.data();
+      if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
+      try {
+        const dueDate = toDate(item.dueDate || item.scheduledDate);
+        if (!dueDate) continue;
+        const daysRemaining = Math.round((utcDay(dueDate) - utcDay(new Date())) / 86400000);
+        if (daysRemaining < 0) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "maintenance_alert_overdue"),
+            {
+              title: "صيانة متأخرة",
+              body: `طلب الصيانة "${item.title || ""}" للعميل ${item.customerName || ""} متأخر عن موعده المحدد`,
+              data: { type: "maintenance_alert_overdue", maintenance_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        } else if (daysRemaining <= MAX_WARNING_DAYS) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "maintenance_alert_urgent"),
+            {
+              title: "صيانة قادمة",
+              body: `طلب الصيانة "${item.title || ""}" للعميل ${item.customerName || ""} سيستحق خلال ${daysRemaining} يوم`,
+              data: { type: "maintenance_alert_urgent", maintenance_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        }
+        totals.scanned++;
+      } catch (error) {
+        console.error(`Failed maintenance ${doc.ref.path}:`, error.message);
+        totals.errors++;
+      }
+    }
+    await sleep(1000);
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+}
+
+async function processRentals(db, orgEmail, users, settingsById, apiKey, totals) {
+  let lastDocument = null;
+  while (true) {
+    let query = db.collectionGroup("rentals").limit(FIRESTORE_PAGE_SIZE);
+    if (lastDocument) query = query.startAfter(lastDocument);
+    const page = await query.get();
+    if (page.empty) break;
+    lastDocument = page.docs[page.docs.length - 1];
+
+    for (const doc of page.docs) {
+      const item = doc.data();
+      if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
+      try {
+        const endDate = toDate(item.endDate || item.dueDate);
+        if (!endDate) continue;
+        const daysRemaining = Math.round((utcDay(endDate) - utcDay(new Date())) / 86400000);
+        if (daysRemaining < 0) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "rental_alert_expired"),
+            {
+              title: "تأجير متأخر",
+              body: `عقد تأجير "${item.itemName || ""}" للمستأجر "${item.renterName || item.customerName || ""}" متأخر عن موعد الإرجاع`,
+              data: { type: "rental_alert_expired", rental_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        } else if (daysRemaining <= MAX_WARNING_DAYS) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "rental_alert_expiring_soon"),
+            {
+              title: "قرب انتهاء عقد التأجير",
+              body: `عقد تأجير "${item.itemName || ""}" للمستأجر "${item.renterName || item.customerName || ""}" سينتهي خلال ${daysRemaining} يوم`,
+              data: { type: "rental_alert_expiring_soon", rental_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        }
+        totals.scanned++;
+      } catch (error) {
+        console.error(`Failed rental ${doc.ref.path}:`, error.message);
+        totals.errors++;
+      }
+    }
+    await sleep(1000);
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+}
+
+async function processExpenses(db, orgEmail, users, settingsById, apiKey, totals) {
+  let lastDocument = null;
+  while (true) {
+    let query = db.collectionGroup("expenses").limit(FIRESTORE_PAGE_SIZE);
+    if (lastDocument) query = query.startAfter(lastDocument);
+    const page = await query.get();
+    if (page.empty) break;
+    lastDocument = page.docs[page.docs.length - 1];
+
+    for (const doc of page.docs) {
+      const item = doc.data();
+      if (normalizeOrganizationEmail(item.organizationEmail || "") !== orgEmail) continue;
+      try {
+        const dueDate = toDate(item.date || item.dueDate);
+        if (!dueDate) continue;
+        const daysRemaining = Math.round((utcDay(dueDate) - utcDay(new Date())) / 86400000);
+        if (daysRemaining < 0) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "expenses_alert_pending"),
+            {
+              title: "مصروف متأخر",
+              body: `مصروف "${item.title || item.category || ""}" بقيمة ${(item.amount || 0).toFixed(0)} د.ع متأخر عن موعده`,
+              data: { type: "expenses_alert_pending", expense_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        } else if (daysRemaining <= MAX_WARNING_DAYS) {
+          await sendOneSignal(
+            eligiblePlayerIds(users, settingsById, "expenses_alert_pending"),
+            {
+              title: "مصروف مستحق",
+              body: `مصروف "${item.title || item.category || ""}" بقيمة ${(item.amount || 0).toFixed(0)} د.ع مستحق خلال ${daysRemaining} يوم`,
+              data: { type: "expenses_alert_pending", expense_id: doc.id || "", organization_email: orgEmail },
+            },
+            apiKey
+          );
+        }
+        totals.scanned++;
+      } catch (error) {
+        console.error(`Failed expense ${doc.ref.path}:`, error.message);
+        totals.errors++;
+      }
+    }
+    await sleep(1000);
+    if (page.size < FIRESTORE_PAGE_SIZE) break;
+  }
+}
+
+async function run() {
+  const apiKey = process.env.ONESIGNAL_REST_API_KEY;
+  if (!apiKey) {
+    console.error("ONESIGNAL_REST_API_KEY environment variable is not set.");
+    process.exitCode = 1;
+    return;
+  }
+  if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.applicationDefault() });
+  const db = admin.firestore();
+  const today = new Date();
+
+  let grandTotals = { scanned: 0, sent: 0, skipped: 0, no_recipients: 0, duplicate: 0, errors: 0 };
+
+  const orgEmails = new Set();
+
+  const sectionProcessors = [
+    { name: "subscriptions", fn: processSubscriptions, typeKeys: ["subscription_alert_expired", "subscription_alert_expiring_soon"] },
+    { name: "customers", fn: processCustomers, typeKeys: ["customer_alert_high_debt"] },
+    { name: "maintenance", fn: processMaintenance, typeKeys: ["maintenance_alert_overdue", "maintenance_alert_urgent"] },
+    { name: "rentals", fn: processRentals, typeKeys: ["rental_alert_expired", "rental_alert_expiring_soon"] },
+    { name: "expenses", fn: processExpenses, typeKeys: ["expenses_alert_pending"] },
+  ];
+
+  for (const section of sectionProcessors) {
+    let lastDocument = null;
+    while (true) {
+      let query = db.collectionGroup(section.name).limit(FIRESTORE_PAGE_SIZE);
+      if (lastDocument) query = query.startAfter(lastDocument);
+      const page = await query.get();
+      if (page.empty) break;
+      lastDocument = page.docs[page.docs.length - 1];
+
+      for (const doc of page.docs) {
+        const item = doc.data();
+        const oe = normalizeOrganizationEmail(item.organizationEmail || "");
+        if (!oe.includes("@")) continue;
+        orgEmails.add(oe);
+      }
+
+      await sleep(1000);
+      if (page.size < FIRESTORE_PAGE_SIZE) break;
+    }
+  }
+
+  for (const orgEmail of orgEmails) {
+    await sleep(5000);
+    const { users, settingsById } = await readUsersAndSettings(db, orgEmail);
+    const totals = { scanned: 0, sent: 0, skipped: 0, no_recipients: 0, duplicate: 0, errors: 0 };
+
+    for (const section of sectionProcessors) {
+      await section.fn(db, orgEmail, users, settingsById, apiKey, totals);
+    }
+
+    grandTotals.scanned += totals.scanned;
+    grandTotals.errors += totals.errors;
   }
 
   console.log("All notifications run completed", grandTotals);

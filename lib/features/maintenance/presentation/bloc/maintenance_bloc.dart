@@ -477,7 +477,6 @@ class MaintenanceBloc extends Bloc<MaintenanceEvent, MaintenanceState> {
               data: {'maintenanceId': event.request.id},
             );
           } on Exception catch (e) {
-            debugPrint('Failed to send maintenance_created notification: $e');
             final currentUser = FirebaseAuth.instance.currentUser;
             unawaited(
               repository.addMaintenanceLog(
@@ -657,9 +656,6 @@ class MaintenanceBloc extends Bloc<MaintenanceEvent, MaintenanceState> {
                       data: {'maintenanceId': event.request.id},
                     );
                   } on Exception catch (e) {
-                    debugPrint(
-                      'Failed to send maintenance_updated notification: $e',
-                    );
                     final currentUser = FirebaseAuth.instance.currentUser;
                     unawaited(
                       repository.addMaintenanceLog(
@@ -745,9 +741,6 @@ class MaintenanceBloc extends Bloc<MaintenanceEvent, MaintenanceState> {
                       data: {'maintenanceId': event.id},
                     );
                   } on Exception catch (e) {
-                    debugPrint(
-                      'Failed to send maintenance_deleted notification: $e',
-                    );
                     final currentUser = FirebaseAuth.instance.currentUser;
                     unawaited(
                       repository.addMaintenanceLog(
@@ -1188,8 +1181,7 @@ class MaintenanceBloc extends Bloc<MaintenanceEvent, MaintenanceState> {
       result,
     ) {
       result.fold(
-        // أخطاء ستريم المعدات لا تُلغي عرض الطلبات — تُسجل فقط
-        (failure) => debugPrint('Equipment stream error: ${failure.message}'),
+        (_) {},
         (equipment) => add(MaintenanceEquipmentStreamDataReceived(equipment)),
       );
     });
@@ -1214,7 +1206,7 @@ class MaintenanceBloc extends Bloc<MaintenanceEvent, MaintenanceState> {
       result,
     ) {
       result.fold(
-        (failure) => debugPrint('Equipment stream error: ${failure.message}'),
+        (_) {},
         (equipment) => add(MaintenanceEquipmentStreamDataReceived(equipment)),
       );
     });

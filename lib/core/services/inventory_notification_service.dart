@@ -98,52 +98,96 @@ class InventoryNotificationService {
       final expiryDate = item['expiryDate'] as DateTime?;
       final itemName = item['name'] as String? ?? 'صنف';
 
-      // التحقق من المخزون المنخفض
+      // التحقق من المخزون المنخفض - إدراج في قائمة الانتظار
       if ((settings['lowStockEnabled'] as bool? ?? true) &&
           quantity <= threshold &&
           quantity > 0) {
         final notificationId = '${itemId}_lowstock_$dayKey';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendLowStockNotification(
-            itemId,
-            itemName,
-            quantity,
-            threshold,
-          );
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: مخزون منخفض',
+              body:
+                  'المخزون الحالي للصنف "$itemName" ($quantity) أقل من الحد الأدنى ($threshold)',
+              type: 'inventory_alert_low_stock',
+              scheduledAt: DateTime.now(),
+              data: {
+                'item_id': itemId,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
       }
 
-      // التحقق من المخزون المنتهي
+      // التحقق من المخزون المنتهي - إدراج في قائمة الانتظار
       if ((settings['outOfStockEnabled'] as bool? ?? true) && quantity <= 0) {
         final notificationId = '${itemId}_outofstock_$dayKey';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendOutOfStockNotification(itemId, itemName);
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: مخزون منتهي',
+              body: 'الصنف "$itemName" انتهى من المخزون!',
+              type: 'inventory_alert_out_of_stock',
+              scheduledAt: DateTime.now(),
+              data: {
+                'item_id': itemId,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
       }
 
-      // التحقق من الصلاحية
+      // التحقق من الصلاحية - إدراج في قائمة الانتظار
       if ((settings['expiryEnabled'] as bool? ?? true) && expiryDate != null) {
         final daysUntilExpiry = expiryDate.difference(now).inDays;
         if (daysUntilExpiry <= 7 && daysUntilExpiry > 0) {
           final notificationId = '${itemId}_expiry_$dayKey';
           if (!shownNotifications.contains(notificationId)) {
-            await _sendExpiryNotification(
-              itemId,
-              itemName,
-              daysUntilExpiry,
-              expiryDate,
-            );
+            try {
+              await PushNotificationService.enqueueNotification(
+                title: 'تنبيه: قرب انتهاء الصلاحية',
+                body:
+                    'الصنف "$itemName" ينتهي صلاحيته خلال $daysUntilExpiry أيام (${_formatDate(expiryDate)})',
+                type: 'inventory_alert_out_of_stock',
+                scheduledAt: DateTime.now(),
+                data: {
+                  'item_id': itemId,
+                  'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+              );
+            } on FirebaseException catch (_) {
+              continue;
+            }
             shownNotifications.add(notificationId);
             hasChanges = true;
           }
         } else if (daysUntilExpiry <= 0) {
           final notificationId = '${itemId}_expired_$dayKey';
           if (!shownNotifications.contains(notificationId)) {
-            await _sendExpiredNotification(itemId, itemName);
+            try {
+              await PushNotificationService.enqueueNotification(
+                title: 'تنبيه: صلاحية منتهية',
+                body: 'الصنف "$itemName" انتهت صلاحيته! يجب إزالته من المخزون.',
+                type: 'inventory_alert_out_of_stock',
+                scheduledAt: DateTime.now(),
+                data: {
+                  'item_id': itemId,
+                  'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+              );
+            } on FirebaseException catch (_) {
+              continue;
+            }
             shownNotifications.add(notificationId);
             hasChanges = true;
           }
@@ -166,73 +210,7 @@ class InventoryNotificationService {
     }
   }
 
-  /// ترسل إشعار عن مخزون منخفض
-  static Future<void> _sendLowStockNotification(
-    String itemId,
-    String itemName,
-    num quantity,
-    num threshold,
-  ) async {
-    final title = 'تنبيه: مخزون منخفض';
-    final message =
-        'المخزون الحالي للصنف "$itemName" ($quantity) أقل من الحد الأدنى ($threshold)';
-
-    await PushNotificationService.showLocalInventoryAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(itemId, 'lowstock'),
-    );
-  }
-
-  /// ترسل إشعار عن مخزون منتهي
-  static Future<void> _sendOutOfStockNotification(
-    String itemId,
-    String itemName,
-  ) async {
-    final title = 'تنبيه: مخزون منتهي';
-    final message = 'الصنف "$itemName" انتهى من المخزون!';
-
-    await PushNotificationService.showLocalInventoryAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(itemId, 'outofstock'),
-    );
-  }
-
-  /// ترسل إشعار عن سلعة قريبة من انتهاء الصلاحية
-  static Future<void> _sendExpiryNotification(
-    String itemId,
-    String itemName,
-    int daysUntilExpiry,
-    DateTime expiryDate,
-  ) async {
-    final title = 'تنبيه: قرب انتهاء الصلاحية';
-    final message =
-        'الصنف "$itemName" ينتهي صلاحيته خلال $daysUntilExpiry أيام (${_formatDate(expiryDate)})';
-
-    await PushNotificationService.showLocalInventoryAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(itemId, 'expiry'),
-    );
-  }
-
-  /// ترسل إشعار عن سلعة انتهت صلاحيتها
-  static Future<void> _sendExpiredNotification(
-    String itemId,
-    String itemName,
-  ) async {
-    final title = 'تنبيه: صلاحية منتهية';
-    final message = 'الصنف "$itemName" انتهت صلاحيته! يجب إزالته من المخزون.';
-
-    await PushNotificationService.showLocalInventoryAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(itemId, 'expired'),
-    );
-  }
-
-  /// تنسيق التاريخ بصيغة سهلة القراءة
+  /// إرسال إشعار عند إضافة صنف مخزون جديد
   static String _formatDate(DateTime date) {
     final monthNames = [
       'يناير',

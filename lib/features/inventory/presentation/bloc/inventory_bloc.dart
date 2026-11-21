@@ -1,25 +1,23 @@
 import 'dart:async';
 
+import 'package:ashur/core/services/push_notification_service.dart';
+import 'package:ashur/core/services/section_notification_service.dart';
+import 'package:ashur/core/services/settings_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dartz/dartz.dart';
 import 'package:equatable/equatable.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/error/failures.dart';
 import '../../../../core/permissions/permission_checker.dart';
-import 'package:ashur/core/services/push_notification_service.dart';
-import 'package:ashur/core/services/section_notification_service.dart';
-import 'package:ashur/core/services/settings_service.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../../domain/entities/category_entity.dart';
-import '../../domain/entities/categories_page.dart';
 import '../../domain/entities/inventory_log_entity.dart';
 import '../../domain/entities/inventory_movement_entity.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/entities/product_log_entity.dart';
 import '../../domain/entities/shelf_entity.dart';
-import '../../domain/entities/shelves_page.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../../domain/repositories/shelf_repository.dart';
 import '../../domain/usecases/create_category.dart' as create_category_usecase;
@@ -567,8 +565,8 @@ class InventoryBloc extends Bloc<InventoryEvent, InventoryState> {
                   actorEmail: productActorEmail,
                   data: {'productId': newProduct.id},
                 );
-              } on Exception catch (e) {
-                debugPrint('فشل في إرسال إشعار إنشاء منتج المخزون: $e');
+              } on Exception catch (_) {
+                // فشل الإشعار لا يمنع إنشاء منتج المخزون.
               }
             }());
           }
@@ -745,8 +743,8 @@ class InventoryBloc extends Bloc<InventoryEvent, InventoryState> {
                   actorEmail: deleteProductActorEmail,
                   data: {'productId': event.productId},
                 );
-              } on Exception catch (e) {
-                debugPrint('فشل في إرسال إشعار حذف منتج المخزون: $e');
+              } on Exception catch (_) {
+                // فشل الإشعار لا يمنع حذف منتج المخزون.
               }
             }());
           }
@@ -899,8 +897,8 @@ class InventoryBloc extends Bloc<InventoryEvent, InventoryState> {
                 actorEmail: productActorEmail,
                 data: {'productId': updatedProduct.id},
               );
-            } on Exception catch (e) {
-              debugPrint('فشل في إرسال إشعار تحديث كمية المنتج: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع تحديث كمية المخزون.
             }
           }());
         }

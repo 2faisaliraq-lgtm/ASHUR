@@ -1,15 +1,15 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../../app/routes/app_routes.dart';
 import '../../../../core/permissions/permission_checker.dart';
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../core/responsive/responsive_scaffold.dart' as scaffold;
 import '../../../../core/theme/assyrian_theme.dart';
-import '../../../../core/widgets/loading_widget.dart';
 import '../../../../core/widgets/empty_state_widget.dart';
+import '../../../../core/widgets/loading_widget.dart';
 import '../../../../core/widgets/paginated_list_view.dart';
 import '../../domain/entities/user_management_entity.dart';
 import '../bloc/users_bloc.dart';
@@ -729,160 +729,165 @@ class _UsersListPageState extends State<UsersListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
-        onTap: () {
-          Navigator.of(
-            context,
-          ).pushNamed(AppRoutes.userDetails, arguments: user);
-        },
-        leading: PopupMenuButton<String>(
-          padding: EdgeInsets.zero,
-          constraints: BoxConstraints(minWidth: 100.w),
-          onSelected: (value) {
-            if (value == 'edit') {
-              Navigator.of(
-                context,
-              ).pushNamed(AppRoutes.editUser, arguments: user);
-            } else if (value == 'delete') {
-              _confirmDelete(user);
-            } else if (value == 'toggle_status') {
-              _toggleUserStatus(user);
-            }
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
+          onTap: () {
+            Navigator.of(
+              context,
+            ).pushNamed(AppRoutes.userDetails, arguments: user);
           },
-          itemBuilder: (context) => [
-            if (_canEdit)
-              PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 16.sp, color: Colors.blue),
-                    SizedBox(width: 6.w),
-                    Text('تعديل', style: TextStyle(fontSize: 13.sp)),
-                  ],
-                ),
-              ),
-            if (_canEdit)
-              PopupMenuItem(
-                value: 'toggle_status',
-                child: Row(
-                  children: [
-                    Icon(
-                      user.isActive ? Icons.block : Icons.check_circle,
-                      size: 16.sp,
-                      color: user.isActive ? Colors.orange : Colors.green,
-                    ),
-                    SizedBox(width: 6.w),
-                    Text(
-                      user.isActive ? 'تعطيل' : 'تفعيل',
-                      style: TextStyle(fontSize: 13.sp),
-                    ),
-                  ],
-                ),
-              ),
-            if (_canDelete)
-              PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, size: 16.sp, color: Colors.red),
-                    SizedBox(width: 6.w),
-                    Text('حذف', style: TextStyle(fontSize: 13.sp)),
-                  ],
-                ),
-              ),
-          ],
-          child: CircleAvatar(
-            backgroundColor: AssyrianTheme.primaryGold.withValues(alpha: 0.1),
-            radius: 22.r,
-            child: Text(
-              (user.name?.isNotEmpty ?? false)
-                  ? user.name![0].toUpperCase()
-                  : 'U',
-              style: TextStyle(
-                fontSize: 16.sp,
-                fontWeight: FontWeight.bold,
-                color: AssyrianTheme.primaryGold,
-              ),
-            ),
-          ),
-        ),
-        title: Text(
-          user.name ?? 'مستخدم غير معروف',
-          style: TextStyle(
-            fontSize: 14.sp,
-            fontWeight: FontWeight.bold,
-            color: AssyrianTheme.deepBlue,
-          ),
-        ),
-        subtitle: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: 3.h),
-            Text(
-              user.email ?? 'غير محدد',
-              style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            if (user.roles.isNotEmpty) ...[
-              SizedBox(height: 3.h),
-              Wrap(
-                spacing: 4.w,
-                runSpacing: 4.h,
-                children: user.roles.take(2).map((role) {
-                  return Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 6.w,
-                      vertical: 2.h,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AssyrianTheme.primaryGold.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6.r),
-                      border: Border.all(
-                        color: AssyrianTheme.primaryGold.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: Text(
-                      role.displayName,
-                      style: TextStyle(
-                        fontSize: 9.sp,
-                        color: AssyrianTheme.deepBlue,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ],
-        ),
-        trailing: IntrinsicWidth(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 3.h),
-                decoration: BoxDecoration(
-                  color: user.isActive
-                      ? Colors.green.withValues(alpha: 0.1)
-                      : Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6.r),
-                ),
-                child: Text(
-                  user.isActive ? 'نشط' : 'غير نشط',
-                  style: TextStyle(
-                    fontSize: 9.sp,
-                    color: user.isActive ? Colors.green : Colors.red,
-                    fontWeight: FontWeight.bold,
+          leading: PopupMenuButton<String>(
+            padding: EdgeInsets.zero,
+            constraints: BoxConstraints(minWidth: 100.w),
+            onSelected: (value) {
+              if (value == 'edit') {
+                Navigator.of(
+                  context,
+                ).pushNamed(AppRoutes.editUser, arguments: user);
+              } else if (value == 'delete') {
+                _confirmDelete(user);
+              } else if (value == 'toggle_status') {
+                _toggleUserStatus(user);
+              }
+            },
+            itemBuilder: (context) => [
+              if (_canEdit)
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 16.sp, color: Colors.blue),
+                      SizedBox(width: 6.w),
+                      Text('تعديل', style: TextStyle(fontSize: 13.sp)),
+                    ],
                   ),
                 ),
-              ),
+              if (_canEdit)
+                PopupMenuItem(
+                  value: 'toggle_status',
+                  child: Row(
+                    children: [
+                      Icon(
+                        user.isActive ? Icons.block : Icons.check_circle,
+                        size: 16.sp,
+                        color: user.isActive ? Colors.orange : Colors.green,
+                      ),
+                      SizedBox(width: 6.w),
+                      Text(
+                        user.isActive ? 'تعطيل' : 'تفعيل',
+                        style: TextStyle(fontSize: 13.sp),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_canDelete)
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 16.sp, color: Colors.red),
+                      SizedBox(width: 6.w),
+                      Text('حذف', style: TextStyle(fontSize: 13.sp)),
+                    ],
+                  ),
+                ),
             ],
+            child: CircleAvatar(
+              backgroundColor: AssyrianTheme.primaryGold.withValues(alpha: 0.1),
+              radius: 22.r,
+              child: Text(
+                (user.name?.isNotEmpty ?? false)
+                    ? user.name![0].toUpperCase()
+                    : 'U',
+                style: TextStyle(
+                  fontSize: 16.sp,
+                  fontWeight: FontWeight.bold,
+                  color: AssyrianTheme.primaryGold,
+                ),
+              ),
+            ),
+          ),
+          title: Text(
+            user.name ?? 'مستخدم غير معروف',
+            style: TextStyle(
+              fontSize: 14.sp,
+              fontWeight: FontWeight.bold,
+              color: AssyrianTheme.deepBlue,
+            ),
+          ),
+          subtitle: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(height: 3.h),
+              Text(
+                user.email ?? 'غير محدد',
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (user.roles.isNotEmpty) ...[
+                SizedBox(height: 3.h),
+                Wrap(
+                  spacing: 4.w,
+                  runSpacing: 4.h,
+                  children: user.roles.take(2).map((role) {
+                    return Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 6.w,
+                        vertical: 2.h,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AssyrianTheme.primaryGold.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6.r),
+                        border: Border.all(
+                          color: AssyrianTheme.primaryGold.withValues(
+                            alpha: 0.3,
+                          ),
+                        ),
+                      ),
+                      child: Text(
+                        role.displayName,
+                        style: TextStyle(
+                          fontSize: 9.sp,
+                          color: AssyrianTheme.deepBlue,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ],
+          ),
+          trailing: IntrinsicWidth(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 3.h),
+                  decoration: BoxDecoration(
+                    color: user.isActive
+                        ? Colors.green.withValues(alpha: 0.1)
+                        : Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6.r),
+                  ),
+                  child: Text(
+                    user.isActive ? 'نشط' : 'غير نشط',
+                    style: TextStyle(
+                      fontSize: 9.sp,
+                      color: user.isActive ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

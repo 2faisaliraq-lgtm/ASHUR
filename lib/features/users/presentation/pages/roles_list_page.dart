@@ -618,8 +618,10 @@ class _RolesListPageState extends State<RolesListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(8),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(8),
         onTap: () {
           _showRoleDetails(role);
         },
@@ -717,9 +719,10 @@ class _RolesListPageState extends State<RolesListPage> {
               ],
             ),
           ],
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   void _showRoleDetails(RoleEntity role) {

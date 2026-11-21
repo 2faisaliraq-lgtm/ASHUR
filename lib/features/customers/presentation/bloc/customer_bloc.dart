@@ -677,10 +677,8 @@ class CustomerBloc extends Bloc<CustomerEvent, CustomerState> {
                     actorEmail: updateCustomerActorEmail,
                     data: {'customerId': event.customer.id},
                   );
-                } on Exception catch (e) {
-                  debugPrint(
-                    'Failed to send customer_updated notification: $e',
-                  );
+                } on Exception catch (_) {
+                  // فشل الإشعار لا يمنع تحديث بيانات العميل.
                 }
               }());
             }
@@ -847,10 +845,8 @@ class CustomerBloc extends Bloc<CustomerEvent, CustomerState> {
                     actorEmail: deleteCustomerActorEmail,
                     data: {'customerId': event.id},
                   );
-                } on Exception catch (e) {
-                  debugPrint(
-                    'Failed to send customer_deleted notification: $e',
-                  );
+                } on Exception catch (_) {
+                  // فشل الإشعار لا يمنع حذف العميل.
                 }
               }());
             }

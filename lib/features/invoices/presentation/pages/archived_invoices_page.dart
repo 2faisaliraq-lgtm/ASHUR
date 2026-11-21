@@ -1151,9 +1151,11 @@ class _ArchivedInvoicesPageState extends State<ArchivedInvoicesPage> {
         ],
         border: Border.all(color: borderColor),
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
         onTap: () {
           Navigator.of(
             context,
@@ -1291,9 +1293,10 @@ class _ArchivedInvoicesPageState extends State<ArchivedInvoicesPage> {
               ),
             ],
           ),
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   Color _getStatusColor(String status) {

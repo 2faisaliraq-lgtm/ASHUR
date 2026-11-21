@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:arabic_reshaper/arabic_reshaper.dart';
 import 'package:flutter/services.dart';
@@ -15,17 +15,74 @@ import '../formatting_service.dart';
 
 class PdfService {
   final FormattingService _formattingService = FormattingService();
+  pw.Font? _cachedRegularFont;
+  pw.Font? _cachedBoldFont;
+  InvoiceTemplateEntity? _cachedDefaultTemplate;
+  static final Map<String, String> _arCache = {};
 
-  /// تشكيل النص العربي لعرض صحيح في ملفات PDF
+  /// تهيئة خدمة تنسيق النصوص العربية للبي دي إف
   String _ar(String text) {
+    // إرجاع من الكاش إذا وجد لتجنب إعادة التشكيل
+    final cached = _arCache[text];
+    if (cached != null) return cached;
+
+    // تجنب إعادة تشكيل النصوص التي لا تحتوي على أحرف عربية (أرقام، رموز، إنجليزي)
+    final hasArabic = RegExp(r'[\u0600-\u06FF]').hasMatch(text);
+    if (!hasArabic) {
+      _arCache[text] = text;
+      return text;
+    }
+
     try {
-      return ArabicReshaper.instance.reshape(text);
+      final reshaped = ArabicReshaper.instance.reshape(text);
+      _arCache[text] = reshaped;
+      return reshaped;
     } on Exception {
+      _arCache[text] = text;
       return text;
     }
   }
 
-  /// إنشاء فاتورة PDF
+  /// تسخين كاش النصوص العربية الشائعة لتجنب إعادة التشكيل في أول استخدام
+  void _prewarmArCache() {
+    final commonTexts = [
+      // العناوين والتسميات العامة
+      'المجموع', 'السعر', 'الكمية', 'الصنف', '#',
+      'المبلغ الصافي:', 'الضريبة:', 'الخصم:', 'المدفوع:', 'المتبقي:',
+      'المبالغ المستلمة من العميل:', 'المبالغ المعطاة للعميل:', 'المبالغ المدفوعة:',
+      'فواتير لها رصيد (مدفوعة):', 'مرجع البيع:', 'قيمة الفواتير:',
+      'دين العميل (المتبقي):', 'الرصيد بعد الفاتورة:',
+      // الرصيد قبل الفاتورة
+      'الرصيد قبل الفاتورة (مدين):', 'الرصيد قبل الفاتورة (دائن):',
+      'الرصيد قبل الفاتورة (مستقر):',
+      // معلومات العميل والشركة
+      'معلومات العميل', 'معلومات الشركة', 'العميل:', 'الهاتف:',
+      'رقم الفاتورة:', 'التاريخ:', 'النوع:', 'الحالة:',
+      // الفواتير والتفاصيل
+      'تفاصيل الفاتورة', 'قائمة الفواتير', 'ملاحظات:',
+      'نوع الفاتورة:', 'الصفحة', 'من', 'سجل الفواتير المرفق',
+      'تاريخ التصدير:',
+      // تنبيه المتبقي
+      'إذا كان المتبقي موجباً فهو عليه، وإذا كان سالباً فهو له',
+      // أنواع الفواتير
+      'المبيعات', 'المشتريات', 'الاشتراك', 'الصيانة', 'الإيجار', 'النقدي',
+      'غير معروف',
+      // نصوص القالب الافتراضي
+      'شكراً لتعاملكم معنا', 'شكراً لثقتكم بنا',
+    ];
+    for (final text in commonTexts) {
+      if (!_arCache.containsKey(text)) {
+        try {
+          final reshaped = ArabicReshaper.instance.reshape(text);
+          _arCache[text] = reshaped;
+        } on Exception {
+          _arCache[text] = text;
+        }
+      }
+    }
+  }
+
+  /// إنشاء ملف PDF لفاتورة واحدة
   Future<File> generateInvoicePdf({
     required InvoiceEntity invoice,
     required InvoiceTemplateEntity template,
@@ -37,17 +94,20 @@ class PdfService {
     // تهيئة خدمة التنسيق
     await _formattingService.initialize();
 
+    // تسخين كاش النصوص العربية الشائعة لتسريع الإنشاء الأول
+    _prewarmArCache();
+
     final pdf = pw.Document();
 
-    // تحميل الخط العربي
+    // تحميل الخطوط العربية
     final arabicFont = await _loadArabicFont();
     final arabicFontBold = await _loadArabicFontBold();
 
-    // تحويل الألوان من hex
+    // تحويل الألوان السداسية إلى ألوان PdfColor
     final headerColor = _hexToColor(template.headerColor);
     final accentColor = _hexToColor(template.accentColor);
 
-    // قراءة جميع القياسات من القالب فقط - بدون قيم افتراضية
+    // قراءة أحجام الخط والهوامش من القالب
     final titleFontSize =
         template.customFields?['titleFontSizeValue'] as double? ?? 18.0;
     final subtitleFontSize =
@@ -67,13 +127,12 @@ class PdfService {
     final marginRight =
         template.customFields?['pageMarginRightMM'] as double? ?? 0.0;
 
-    // إنشاء صفحة الفاتورة بقياسات A4 القياسية (210mm × 297mm)
-    // استخدام MultiPage لدعم المحتوى الذي يمتد لعدة صفحات
+    // إعداد صفحة A4 (210mm × 297mm) مع دعم الصفحات المتعددة عبر MultiPage
     pdf.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4, // 210mm × 297mm
+        pageFormat: PdfPageFormat.a4,
         margin: pw.EdgeInsets.fromLTRB(
-          marginLeft * PdfPageFormat.mm, // تحويل mm إلى points
+          marginLeft * PdfPageFormat.mm,
           marginTop * PdfPageFormat.mm,
           marginRight * PdfPageFormat.mm,
           marginBottom * PdfPageFormat.mm,
@@ -81,7 +140,7 @@ class PdfService {
         textDirection: pw.TextDirection.rtl,
         theme: pw.ThemeData.withFont(base: arabicFont, bold: arabicFontBold),
 
-        // الهيدر (يتكرر في كل صفحة)
+        // الترويسة (تظهر في كل صفحة)
         header: (context) => _buildHeader(
           template: template,
           invoice: invoice,
@@ -95,12 +154,12 @@ class PdfService {
           bodyFontSize: bodyFontSize,
         ),
 
-        // التذييل (يتكرر في كل صفحة)
+        // التذييل (يظهر في كل صفحة)
         footer: (context) => pw.Container(
           alignment: pw.Alignment.center,
           margin: const pw.EdgeInsets.only(top: 0.0 * PdfPageFormat.cm),
           child: pw.Text(
-            'صفحة ${context.pageNumber} من ${context.pagesCount}',
+            _ar('صفحة ${context.pageNumber} من ${context.pagesCount}'),
             style: pw.TextStyle(
               color: PdfColors.grey,
               fontSize: footerFontSize,
@@ -108,9 +167,9 @@ class PdfService {
           ),
         ),
 
-        // بناء محتوى الصفحات
+        // بناء محتوى الصفحة
         build: (context) => <pw.Widget>[
-          // مسافة علوية لفصل المحتوى عن الهيدر (الشعار ومعلومات الشركة)
+          // مسافة أسفل الترويسة
           pw.SizedBox(height: 70),
 
           // معلومات العميل
@@ -123,7 +182,7 @@ class PdfService {
             ),
           pw.SizedBox(height: 15),
 
-          // جدول الأصناف (سيمتد عبر الصفحات)
+          // جدول الأصناف
           if (template.showItemsTable)
             _buildItemsTable(
               invoice,
@@ -136,27 +195,13 @@ class PdfService {
 
           pw.SizedBox(height: 15),
 
-          // تنظيم الإجماليات والملاحظات في صف واحد
+          // قسم الإجماليات
           pw.Row(
-            crossAxisAlignment:
-                pw.CrossAxisAlignment.start, // محاذاة العناصر للأعلى
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // الملاحظات (على اليمين في سياق RTL)
-              if (template.showNotes && invoice.notes != null)
-                pw.Expanded(
-                  flex: 3, // يمكن تعديل النسبة حسب الحاجة
-                  child: _buildNotes(
-                    invoice.notes!,
-                    accentColor,
-                    subtitleFontSize,
-                    bodyFontSize,
-                  ),
-                ),
-              if (template.showNotes && invoice.notes != null)
-                pw.SizedBox(width: 15), // فاصل بين الملاحظات والإجماليات
-              // الإجماليات (على اليسار في سياق RTL)
+              // الإجماليات
               pw.Expanded(
-                flex: 2, // يمكن تعديل النسبة حسب الحاجة
+                flex: 2,
                 child: _buildTotals(
                   invoice,
                   template,
@@ -169,46 +214,43 @@ class PdfService {
           ),
           pw.SizedBox(height: 15),
 
-          // التذييل النهائي
+          // تذييل الفاتورة
           _buildFooter(template, accentColor, footerFontSize),
-          // مسافة سفلية لفصل المحتوى عن التذييل (footer)
+          // مسافة أمان أسفل الصفحة قبل التذييل
           pw.SizedBox(height: 60),
         ],
       ),
     );
 
-    // حفظ الملف
+    // حفظ ملف PDF
     return _savePdfFile(pdf, invoice.invoiceNumber);
   }
 
-  /// تحميل الخط العربي (Amiri)
+  /// تحميل الخط العربي العادي
   Future<pw.Font> _loadArabicFont() async {
-    // استخدام خط أميري من الأصول لدعم الحروف العربية المشكّلة
+    if (_cachedRegularFont != null) return _cachedRegularFont!;
     try {
-      final fontData = await rootBundle.load(
-        'assets/fonts/Amiri-Regular.ttf',
-      );
-      return pw.Font.ttf(fontData);
+      final fontData = await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
+      _cachedRegularFont = pw.Font.ttf(fontData);
+      return _cachedRegularFont!;
     } on Exception catch (_) {
-      // استخدام خط بديل يدعم العربية قدر الإمكان
       return pw.Font.helvetica();
     }
   }
 
-  /// تحميل الخط العربي العريض (Amiri Bold)
+  /// تحميل الخط العربي العريض
   Future<pw.Font> _loadArabicFontBold() async {
-    // استخدام خط أميري العريض من الأصول
+    if (_cachedBoldFont != null) return _cachedBoldFont!;
     try {
-      final fontData = await rootBundle.load(
-        'assets/fonts/Amiri-Bold.ttf',
-      );
-      return pw.Font.ttf(fontData);
+      final fontData = await rootBundle.load('assets/fonts/Amiri-Bold.ttf');
+      _cachedBoldFont = pw.Font.ttf(fontData);
+      return _cachedBoldFont!;
     } on Exception catch (_) {
       return _loadArabicFont();
     }
   }
 
-  /// تحويل hex color إلى PdfColor
+  /// تحويل لون Hex إلى PdfColor
   PdfColor _hexToColor(String hexColor) {
     final hex = hexColor.replaceAll('#', '');
     final r = int.parse(hex.substring(0, 2), radix: 16);
@@ -217,7 +259,7 @@ class PdfService {
     return PdfColor(r / 255, g / 255, b / 255);
   }
 
-  /// بناء الهيدر
+  /// بناء الترويسة
   pw.Widget _buildHeader({
     required InvoiceTemplateEntity template,
     required InvoiceEntity invoice,
@@ -231,21 +273,21 @@ class PdfService {
     required double bodyFontSize,
   }) {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(10), // تقليل الارتفاع
+      padding: const pw.EdgeInsets.all(10),
       decoration: pw.BoxDecoration(
         color: headerColor,
-        borderRadius: pw.BorderRadius.circular(0), // زوايا حادة
+        borderRadius: pw.BorderRadius.circular(0),
       ),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: pw.CrossAxisAlignment.center, // توسيط العناصر
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
-          // معلومات الشركة
+          // معلومات المؤسسة
           if (template.showCompanyInfo)
             pw.Expanded(
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
                   pw.Text(
                     _ar(organizationName),
                     style: pw.TextStyle(
@@ -274,7 +316,7 @@ class PdfService {
               ),
             ),
 
-          // الشعار في المنتصف
+          // شعار المؤسسة
           if (template.showLogo && logoBytes != null)
             pw.Container(
               width: template.customFields?['logoWidth'] ?? 80.0,
@@ -286,34 +328,34 @@ class PdfService {
               ),
             ),
 
-          // معلومات الفاتورة
+          // عنوان وبيانات الفاتورة
           pw.Expanded(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.end,
               children: [
-                 pw.Text(
-                    _ar('نوع الفاتورة: ${_getInvoiceTypeName(invoice.type)}'),
-                   style: pw.TextStyle(
-                     fontSize: titleFontSize,
-                     fontWeight: pw.FontWeight.bold,
-                     color: PdfColors.white,
-                   ),
-                 ),
-                  pw.SizedBox(height: 3),
-                  pw.Text(
-                     _ar('رقم الفاتورة: ${invoice.invoiceNumber}'),
-                    style: pw.TextStyle(
-                      fontSize: bodyFontSize - 1,
-                      color: PdfColors.white,
-                    ),
+                pw.Text(
+                  _ar('نوع الفاتورة: ${_getInvoiceTypeName(invoice.type)}'),
+                  style: pw.TextStyle(
+                    fontSize: titleFontSize,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.white,
                   ),
-                  pw.Text(
-                     _ar('التاريخ: ${_formatDate(invoice.invoiceDate)}'),
-                    style: pw.TextStyle(
-                      fontSize: bodyFontSize - 1,
-                      color: PdfColors.white,
-                    ),
+                ),
+                pw.SizedBox(height: 3),
+                pw.Text(
+                  _ar('رقم الفاتورة: ${invoice.invoiceNumber}'),
+                  style: pw.TextStyle(
+                    fontSize: bodyFontSize - 1,
+                    color: PdfColors.white,
                   ),
+                ),
+                pw.Text(
+                  _ar('التاريخ: ${_formatDate(invoice.invoiceDate)}'),
+                  style: pw.TextStyle(
+                    fontSize: bodyFontSize - 1,
+                    color: PdfColors.white,
+                  ),
+                ),
               ],
             ),
           ),
@@ -338,12 +380,11 @@ class PdfService {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          // معلومات العميل (العنوان على اليمين، التفاصيل على اليسار)
           pw.Expanded(
             flex: 1,
-              child: pw.Text(
-                _ar('معلومات العميل'),
-                style: pw.TextStyle(
+            child: pw.Text(
+              _ar('معلومات العميل'),
+              style: pw.TextStyle(
                 fontSize: titleFontSize,
                 fontWeight: pw.FontWeight.bold,
                 color: accentColor,
@@ -351,24 +392,29 @@ class PdfService {
             ),
           ),
           pw.SizedBox(width: 15),
-          // تفاصيل العميل (الاسم، الرصيد، الهاتف)
           pw.Expanded(
             flex: 2,
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  _ar('الاسم: ${invoice.customerName}'),
+                  _ar('العميل: ${invoice.customerName}'),
                   style: pw.TextStyle(fontSize: bodyFontSize),
                 ),
                 if (invoice.balanceBeforeInvoice != null) ...[
                   pw.SizedBox(height: 4),
                   pw.Text(
                     invoice.balanceBeforeInvoice! > 0
-                        ? _ar('الرصيد قبل الفاتورة (مدين): ${_formatAmount(invoice.balanceBeforeInvoice!)}')
+                        ? _ar(
+                            'الرصيد السابق (عليه): ${_formatAmount(invoice.balanceBeforeInvoice!)}',
+                          )
                         : invoice.balanceBeforeInvoice! < 0
-                        ? _ar('الرصيد قبل الفاتورة (دائن): ${_formatAmount(invoice.balanceBeforeInvoice!.abs())}')
-                        : _ar('الرصيد قبل الفاتورة: ${_formatAmount(invoice.balanceBeforeInvoice!)}'),
+                        ? _ar(
+                            'الرصيد السابق (له): ${_formatAmount(invoice.balanceBeforeInvoice!.abs())}',
+                          )
+                        : _ar(
+                            'الرصيد السابق (متزن): ${_formatAmount(invoice.balanceBeforeInvoice!)}',
+                          ),
                     style: pw.TextStyle(fontSize: bodyFontSize),
                   ),
                 ],
@@ -376,23 +422,45 @@ class PdfService {
             ),
           ),
           pw.SizedBox(width: 15),
-          // رقم هاتف العميل
           pw.Expanded(
             flex: 1,
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  _ar('الهاتف: ${invoice.customerPhone}'),
+                  _ar('الاسم: ${invoice.customerName}'),
                   style: pw.TextStyle(fontSize: bodyFontSize),
                 ),
-                // يمكن إضافة معلومات إضافية هنا في المستقبل
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// تحديد تأثير الفاتورة على الرصيد/الدين
+  String _getInvoiceDebtEffect(
+    InvoiceEntity invoice, {
+    bool isSummary = false,
+  }) {
+    if (invoice.type == 'sales_return' || invoice.isSalesReturn) {
+      return 'decrease';
+    }
+
+    if (invoice.type == 'cash') {
+      if (invoice.cashTransactionType == 'receipt') return 'decrease';
+      if (invoice.cashTransactionType == 'payment') return 'increase';
+      final remaining = invoice.totalAmount - invoice.paidAmount;
+      return remaining > 0 ? 'increase' : 'decrease';
+    }
+
+    if (isSummary) {
+      final remaining = invoice.totalAmount - invoice.paidAmount;
+      return remaining > 0 ? 'increase' : 'decrease';
+    }
+
+    return 'increase';
   }
 
   /// بناء جدول الأصناف
@@ -404,7 +472,6 @@ class PdfService {
     double headerFontSize,
     double bodyFontSize,
   ) {
-    // قراءة هوامش الجدول من القالب
     final tableMarginTop =
         template.customFields?['tableMarginTopMM'] as double? ?? 0.0;
     final tableMarginBottom =
@@ -412,22 +479,9 @@ class PdfService {
     final tableCellPadding =
         template.customFields?['tableCellPadding'] as double? ?? 6.0;
 
-    // تحديد تأثير الدين بناءً على نوع الفاتورة
-    // فواتير مرجع البيع تقلل الدين (أخضر)، الفواتير العادية تزيد الدين (أحمر)
-    // الفواتير النقدية: استلام يقلل الدين (أخضر)، إعطاء يزيد الدين (أحمر)
-    final bool isSalesReturn = invoice.type == 'sales_return' ||
-        invoice.isSalesReturn;
-    final bool isCashReceipt = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'receipt';
-    final bool isCashPayment = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'payment';
-    final String debtEffect =
-        isSalesReturn || isCashReceipt ? 'decrease' : 'increase';
+    final String debtEffect = _getInvoiceDebtEffect(invoice);
 
     return pw.Padding(
-      // تم إزالة الهوامش الأفقية الإضافية من هنا
       padding: pw.EdgeInsets.only(
         top: tableMarginTop * PdfPageFormat.mm,
         bottom: tableMarginBottom * PdfPageFormat.mm,
@@ -435,26 +489,25 @@ class PdfService {
       child: pw.Table(
         border: pw.TableBorder.all(color: accentColor, width: 0.5),
         columnWidths: {
-          0: const pw.FlexColumnWidth(1.0), // المجموع (اليمين في RTL)
+          0: const pw.FlexColumnWidth(1.0), // الإجمالي
           1: const pw.FlexColumnWidth(1.0), // السعر
           2: const pw.FlexColumnWidth(0.5), // الكمية
           3: const pw.FlexColumnWidth(3.0), // الصنف
-          4: const pw.FlexColumnWidth(0.5), // # (اليسار في RTL)
+          4: const pw.FlexColumnWidth(0.5), // #
         },
         children: [
-          // رأس الجدول
           pw.TableRow(
             decoration: pw.BoxDecoration(color: headerColor),
             children: [
               _buildTableCell(
-                _ar('المجموع'),
+                _ar('الإجمالي'),
                 isHeader: true,
                 fontSize: headerFontSize,
                 padding: tableCellPadding,
                 backgroundColor: headerColor,
               ),
               _buildTableCell(
-                _ar('السعر'),
+                _ar('سعر الوحدة'),
                 isHeader: true,
                 fontSize: headerFontSize,
                 padding: tableCellPadding,
@@ -468,7 +521,7 @@ class PdfService {
                 backgroundColor: headerColor,
               ),
               _buildTableCell(
-                _ar('الصنف'),
+                _ar('اسم الصنف'),
                 isHeader: true,
                 fontSize: headerFontSize,
                 padding: tableCellPadding,
@@ -484,7 +537,6 @@ class PdfService {
               ),
             ],
           ),
-          // صفوف البيانات
           ...invoice.items.asMap().entries.map((entry) {
             final index = entry.key + 1;
             final item = entry.value;
@@ -531,7 +583,7 @@ class PdfService {
     );
   }
 
-  /// بناء خلية جدول مع تلوين حسب تأثير الدين
+  /// بناء خلية جدول
   pw.Widget _buildTableCell(
     String text, {
     bool isHeader = false,
@@ -556,14 +608,16 @@ class PdfService {
         textAlign: pw.TextAlign.center,
         style: pw.TextStyle(
           fontSize: fontSize,
-          fontWeight: fontWeight ?? (isHeader ? pw.FontWeight.bold : pw.FontWeight.normal),
+          fontWeight:
+              fontWeight ??
+              (isHeader ? pw.FontWeight.bold : pw.FontWeight.normal),
           color: fontColor ?? (isHeader ? PdfColors.white : PdfColors.black),
         ),
       ),
     );
   }
 
-  /// بناء صف الإجمالي مع تلوين خلفية المبلغ حسب تأثير الدين وإضافة إشارة (+/-)
+  /// بناء صف إجمالي مع إشارة +/- وتلوين حسب تأثير الدين
   pw.Widget _buildTotalRow(
     String label,
     double amount, {
@@ -576,9 +630,9 @@ class PdfService {
     final dynamicBg = debtEffect == 'increase'
         ? _hexToColor('#FFEBEE')
         : debtEffect == 'decrease'
-            ? _hexToColor('#E8F5E9')
-            : null;
-    // إضافة إشارة (+ أو -) أمام المبلغ بناءً على تأثير الدين
+        ? _hexToColor('#E8F5E9')
+        : null;
+
     String displayAmount;
     if (debtEffect == 'increase') {
       displayAmount = '+${_formatAmount(amount.abs())}';
@@ -591,7 +645,7 @@ class PdfService {
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         pw.Text(
-          prefix + label,
+          _ar(prefix + label),
           style: pw.TextStyle(
             fontSize: fontSize,
             fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
@@ -614,7 +668,7 @@ class PdfService {
     );
   }
 
-  /// بناء صندوق الإجماليات
+  /// بناء الإجماليات والضرائب والخصم والمدفوع والمتبقي
   pw.Widget _buildTotals(
     InvoiceEntity invoice,
     InvoiceTemplateEntity template,
@@ -622,27 +676,16 @@ class PdfService {
     PdfColor accentColor,
     double bodyFontSize,
   ) {
-    // تحديد تأثير الدين بناءً على نوع الفاتورة
-    // فواتير مرجع البيع تقلل الدين (أخضر)، الفواتير العادية تزيد الدين (أحمر)
-    // الفواتير النقدية: استلام يقلل الدين (أخضر)، إعطاء يزيد الدين (أحمر)
-    final bool isSalesReturn = invoice.type == 'sales_return' ||
-        invoice.isSalesReturn;
-    final bool isCashReceipt = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'receipt';
-    final bool isCashPayment = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'payment';
-    final String itemDebtEffect =
-        isSalesReturn || isCashReceipt ? 'decrease' : 'increase';
+    final String debtEffect = _getInvoiceDebtEffect(invoice);
 
-    final grandRemainingIfBalance =
-        invoice.balanceBeforeInvoice != null
-            ? invoice.calculateRemainingAmount() + invoice.balanceBeforeInvoice!.abs()
-            : null;
+    final grandRemainingIfBalance = invoice.balanceBeforeInvoice != null
+        ? invoice.totalAmount -
+              invoice.paidAmount +
+              invoice.balanceBeforeInvoice!.abs()
+        : null;
 
     return pw.Container(
-      width: 250, // تحديد عرض ثابت لصندوق الإجماليات
+      width: 250,
       margin: const pw.EdgeInsets.only(top: 12),
       padding: const pw.EdgeInsets.all(12),
       decoration: pw.BoxDecoration(
@@ -652,15 +695,13 @@ class PdfService {
       child: pw.Column(
         children: [
           _buildTotalRow(
-            'الإجمالي الفرعي:',
+            'المجموع الفرعي:',
             invoice.totalAmount - invoice.discountAmount,
             fontSize: bodyFontSize,
-            debtEffect: itemDebtEffect,
+            debtEffect: debtEffect,
           ),
-          // عرض الضرائب إذا كانت موجودة
           if (invoice.taxes != null && invoice.taxes!.isNotEmpty) ...[
             pw.SizedBox(height: 4),
-            // عرض تفاصيل كل ضريبة
             ...invoice.taxes!.map((tax) {
               final taxName = tax['name'] as String;
               final taxRate = tax['rate'] as double;
@@ -675,7 +716,7 @@ class PdfService {
                 prefix: isPercentage && taxRate > 0
                     ? '(${taxRate.toStringAsFixed(1)}%) '
                     : '',
-                debtEffect: itemDebtEffect,
+                debtEffect: debtEffect,
               );
             }),
             pw.SizedBox(height: 4),
@@ -685,19 +726,18 @@ class PdfService {
               fontSize: bodyFontSize,
               color: PdfColors.orange,
               isBold: true,
-              debtEffect: itemDebtEffect,
+              debtEffect: debtEffect,
             ),
           ] else if (invoice.taxAmount > 0) ...[
             pw.SizedBox(height: 4),
             _buildTotalRow(
-              'الضريبة:',
+              'إجمالي الضرائب:',
               invoice.taxAmount,
               fontSize: bodyFontSize,
               color: PdfColors.orange,
-              debtEffect: itemDebtEffect,
+              debtEffect: debtEffect,
             ),
           ],
-          // عرض الخصم إذا كان موجوداً — الخصم يقلل الدين دائماً
           if (invoice.discountAmount > 0) ...[
             pw.SizedBox(height: 4),
             _buildTotalRow(
@@ -713,7 +753,12 @@ class PdfService {
             'المدفوع:',
             invoice.paidAmount.abs(),
             fontSize: bodyFontSize,
-            debtEffect: 'decrease',
+            debtEffect:
+                invoice.type == 'cash' &&
+                    invoice.isCashAccountReceipt &&
+                    invoice.cashTransactionType == 'payment'
+                ? 'increase'
+                : 'decrease',
           ),
           if (invoice.type == 'cash' && invoice.isCashAccountReceipt) ...[
             pw.SizedBox(height: 4),
@@ -721,21 +766,21 @@ class PdfService {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Text(
-                  _ar('نوع المعاملة:'),
+                  _ar('نوع الحركة:'),
                   style: pw.TextStyle(
                     fontSize: bodyFontSize,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
                 pw.Text(
-                  _ar(invoice.effectiveCashTransactionType == 'receipt'
-                      ? 'استلام مبلغ من العميل'
-                      : invoice.effectiveCashTransactionType == 'payment'
-                          ? 'إعطاء مبلغ للعميل'
-                          : 'تصفية الحساب'),
-                  style: pw.TextStyle(
-                    fontSize: bodyFontSize,
+                  _ar(
+                    invoice.cashTransactionType == 'receipt'
+                        ? 'سند قبض نقدي'
+                        : invoice.cashTransactionType == 'payment'
+                        ? 'سند صرف نقدي'
+                        : 'حركة نقدية',
                   ),
+                  style: pw.TextStyle(fontSize: bodyFontSize),
                 ),
               ],
             ),
@@ -743,82 +788,52 @@ class PdfService {
           pw.SizedBox(height: 4),
           pw.Divider(color: accentColor, thickness: 1.5),
           pw.SizedBox(height: 4),
-          // المتبقي: إذا كان مديناً (أحمر)، إذا كان دائناً أو صفراً (أخضر)
           _buildTotalRow(
             'المتبقي:',
-            invoice.calculateRemainingAmount(),
+            invoice.totalAmount - invoice.paidAmount,
             isBold: true,
             fontSize: bodyFontSize + 1,
             color: accentColor,
-            debtEffect:
-                invoice.calculateRemainingAmount() > 0 ? 'increase' : 'decrease',
+            debtEffect: invoice.totalAmount - invoice.paidAmount > 0
+                ? 'increase'
+                : 'decrease',
           ),
-          // إضافة الحساب السابق إذا كان موجوداً
           if (invoice.balanceBeforeInvoice != null) ...[
             pw.SizedBox(height: 4),
             _buildTotalRow(
               invoice.balanceBeforeInvoice! > 0
-                  ? 'الحساب السابق (عليك):'
+                  ? 'الرصيد السابق (عليه):'
                   : invoice.balanceBeforeInvoice! < 0
-                      ? 'الحساب السابق (لك):'
-                      : 'الحساب السابق:',
+                  ? 'الرصيد السابق (له):'
+                  : 'الرصيد السابق:',
               invoice.balanceBeforeInvoice!.abs(),
               fontSize: bodyFontSize,
               color: accentColor,
-              debtEffect:
-                  invoice.balanceBeforeInvoice! > 0 ? 'increase' : 'decrease',
+              debtEffect: invoice.balanceBeforeInvoice! > 0
+                  ? 'increase'
+                  : 'decrease',
             ),
             pw.SizedBox(height: 4),
             pw.Divider(color: accentColor, thickness: 1.5),
             pw.SizedBox(height: 4),
             if (grandRemainingIfBalance != null)
               _buildTotalRow(
-                'الحساب الإجمالي:',
+                'الإجمالي النهائي:',
                 grandRemainingIfBalance,
-              isBold: true,
-              fontSize: bodyFontSize + 1,
-              color: headerColor,
-              debtEffect:
-                  grandRemainingIfBalance > 0 ? 'increase' : 'decrease',
-            ),
+                isBold: true,
+                fontSize: bodyFontSize + 1,
+                color: headerColor,
+                debtEffect: grandRemainingIfBalance > 0
+                    ? 'increase'
+                    : 'decrease',
+              ),
           ],
         ],
       ),
     );
   }
 
-  /// بناء الملاحظات
-  pw.Widget _buildNotes(
-    String notes,
-    PdfColor accentColor,
-    double titleFontSize,
-    double bodyFontSize,
-  ) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: accentColor, width: 1),
-        borderRadius: pw.BorderRadius.circular(6),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-                           pw.Text(
-                             _ar('ملاحظات:'),
-                             style: pw.TextStyle(
-                               fontSize: titleFontSize,
-                               fontWeight: pw.FontWeight.bold,
-                               color: accentColor,
-                             ),
-                           ),
-          pw.SizedBox(height: 4),
-          pw.Text(_ar(notes), style: pw.TextStyle(fontSize: bodyFontSize)),
-        ],
-      ),
-    );
-  }
-
-  /// بناء التذييل
+  /// بناء تذييل الفاتورة
   pw.Widget _buildFooter(
     InvoiceTemplateEntity template,
     PdfColor accentColor,
@@ -830,16 +845,16 @@ class PdfService {
         border: pw.Border(top: pw.BorderSide(color: accentColor, width: 2)),
       ),
       child: pw.Center(
-          child: pw.Text(
-            _ar(template.footerText),
-            style: pw.TextStyle(fontSize: fontSize, color: accentColor),
+        child: pw.Text(
+          _ar(template.footerText),
+          style: pw.TextStyle(fontSize: fontSize, color: accentColor),
           textAlign: pw.TextAlign.center,
         ),
       ),
     );
   }
 
-  /// حفظ ملف PDF
+  /// حفظ ملف PDF على جهاز المستخدم
   Future<File> _savePdfFile(pw.Document pdf, String invoiceNumber) async {
     final output = await getApplicationDocumentsDirectory();
     final file = File('${output.path}/invoice_$invoiceNumber.pdf');
@@ -851,47 +866,46 @@ class PdfService {
     return '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')}';
   }
 
-  /// تنسيق المبلغ للعرض مع رمز العملة
+  /// تنسيق المبالغ المالية
   String _formatAmount(double amount) {
     return _formattingService.formatCurrency(amount);
   }
 
-  /// تنسيق الأرقام (للكميات)
+  /// تنسيق الأرقام
   String _formatNumber(double number) {
     return _formattingService.formatNumber(number);
   }
 
-  /// الحصول على اسم نوع الفاتورة
+  /// الحصول على اسم نوع الفاتورة بالعربية
   String _getInvoiceTypeName(String type) {
     switch (type) {
       case 'sales':
-        return 'مبيعات';
+        return 'فاتورة مبيعات';
       case 'purchase':
-        return 'مشتريات';
+        return 'فاتورة مشتريات';
       case 'subscription':
-        return 'اشتراك';
+        return 'فاتورة اشتراك';
       case 'maintenance':
-        return 'صيانة';
+        return 'فاتورة صيانة';
       case 'rental':
-        return 'إيجار';
+        return 'فاتورة إيجار';
       case 'cash':
-        return 'نقدية';
+        return 'سند نقدي';
       default:
-        return 'أخرى';
+        return 'فاتورة';
     }
   }
 
-  /// مشاركة PDF
+  /// مشاركة ملف PDF
   Future<void> sharePdf(File pdfFile) async {
     try {
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(pdfFile.path)],
-          subject: 'فاتورة ${pdfFile.path.split('/').last}',
+          subject: _ar('فاتورة ${pdfFile.path.split('/').last}'),
         ),
       );
     } on Exception {
-      // Fallback: copy file to accessible location
       final output = await getApplicationDocumentsDirectory();
       final sharedFile = File(
         '${output.path}/shared_${pdfFile.path.split('/').last}',
@@ -900,18 +914,16 @@ class PdfService {
     }
   }
 
-  /// طباعة PDF - استخدام المشاركة كبديل
+  /// طباعة ملف PDF
   Future<void> printPdf(File pdfFile) async {
     try {
-      // استخدام Share.shareXFiles والذي يدعم الطباعة على بعض الأجهزة
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(pdfFile.path)],
-          subject: 'طباعة ${pdfFile.path.split('/').last}',
+          subject: _ar('طباعة ${pdfFile.path.split('/').last}'),
         ),
       );
     } on Exception {
-      // Fallback: copy file to accessible location
       final output = await getApplicationDocumentsDirectory();
       final printedFile = File(
         '${output.path}/printed_${pdfFile.path.split('/').last}',
@@ -920,9 +932,7 @@ class PdfService {
     }
   }
 
-  /// Generate a consolidated history PDF for multiple invoices using the original app template design.
-  /// Page 1: summary sheet with totals.
-  /// Following pages: per-invoice detail pages.
+  /// إنشاء ملف PDF موحد لسجل عدة فواتير مع صفحة ملخص وصفحات تفاصيل
   Future<File> generateInvoicesHistoryPdf({
     required List<InvoiceEntity> invoices,
     required String organizationName,
@@ -931,8 +941,12 @@ class PdfService {
     Uint8List? logoBytes,
     InvoiceTemplateEntity? template,
     String? customerName,
+    double? customerDebt,
   }) async {
     await _formattingService.initialize();
+
+    // تسخين كاش النصوص العربية الشائعة لتسريع الإنشاء الأول
+    _prewarmArCache();
 
     final pdf = pw.Document();
 
@@ -941,60 +955,61 @@ class PdfService {
 
     final templateEntity =
         template ??
-        InvoiceTemplateEntity(
-          id: 'template_classic',
-          name: 'القالب الكلاسيكي',
-          type: 'general',
-          headerColor: '#1B365D',
-          accentColor: '#D4AF37',
-          showLogo: true,
-          logoPosition: 'right',
-          showCompanyInfo: true,
-          showCustomerInfo: true,
-          showItemsTable: true,
-          showNotes: true,
-          showSignature: false,
-          footerText: 'شكراً لتعاملكم معنا',
-          isDefault: true,
-          customFields: {
-            'pageMarginTopMM': 0.0,
-            'pageMarginBottomMM': 0.0,
-            'pageMarginLeftMM': 0.0,
-            'pageMarginRightMM': 0.0,
-            'titleFontSizeValue': 18.0,
-            'subtitleFontSizeValue': 14.0,
-            'headerFontSizeValue': 12.0,
-            'bodyFontSizeValue': 11.0,
-            'footerFontSizeValue': 8.0,
-            'tableCellPadding': 6.0,
-            'logoWidth': 120.0,
-            'logoHeight': 120.0,
-            'headerPadding': 20.0,
-            'headerBorderRadius': 0.0,
-            'companyNameFontSize': 24.0,
-            'companyInfoFontSize': 12.0,
-            'invoiceTitleFontSize': 20.0,
-            'invoiceInfoFontSize': 12.0,
-            'customerInfoPadding': 15.0,
-            'customerInfoBorderWidth': 2.0,
-            'customerInfoBorderRadius': 0.0,
-            'customerInfoTitleFontSize': 16.0,
-            'customerInfoTextFontSize': 12.0,
-            'tableBorderWidth': 1.0,
-            'tableHeaderFontSize': 12.0,
-            'tableRowFontSize': 10.0,
-            'alternateRowColors': true,
-            'alternateRowColor': '#F5F5F5',
-            'footerPadding': 10.0,
-            'footerBorderWidth': 2.0,
-            'footerFontSize': 10.0,
-            'showBorderAroundTable': true,
-            'useRoundCorners': false,
-            'useGradientHeader': false,
-            'showInvoiceNumberLarge': false,
-            'useCardStyleForSections': false,
-          },
-        );
+        (_cachedDefaultTemplate ??
+            (_cachedDefaultTemplate = InvoiceTemplateEntity(
+              id: 'template_classic',
+              name: 'القالب الكلاسيكي',
+              type: 'general',
+              headerColor: '#1B365D',
+              accentColor: '#D4AF37',
+              showLogo: true,
+              logoPosition: 'right',
+              showCompanyInfo: true,
+              showCustomerInfo: true,
+              showItemsTable: true,
+              showNotes: true,
+              showSignature: false,
+              footerText: 'شكراً لتعاملكم معنا',
+              isDefault: true,
+              customFields: {
+                'pageMarginTopMM': 0.0,
+                'pageMarginBottomMM': 0.0,
+                'pageMarginLeftMM': 0.0,
+                'pageMarginRightMM': 0.0,
+                'titleFontSizeValue': 18.0,
+                'subtitleFontSizeValue': 14.0,
+                'headerFontSizeValue': 12.0,
+                'bodyFontSizeValue': 11.0,
+                'footerFontSizeValue': 8.0,
+                'tableCellPadding': 6.0,
+                'logoWidth': 120.0,
+                'logoHeight': 120.0,
+                'headerPadding': 20.0,
+                'headerBorderRadius': 0.0,
+                'companyNameFontSize': 24.0,
+                'companyInfoFontSize': 12.0,
+                'invoiceTitleFontSize': 20.0,
+                'invoiceInfoFontSize': 12.0,
+                'customerInfoPadding': 15.0,
+                'customerInfoBorderWidth': 2.0,
+                'customerInfoBorderRadius': 0.0,
+                'customerInfoTitleFontSize': 16.0,
+                'customerInfoTextFontSize': 12.0,
+                'tableBorderWidth': 1.0,
+                'tableHeaderFontSize': 12.0,
+                'tableRowFontSize': 10.0,
+                'alternateRowColors': true,
+                'alternateRowColor': '#F5F5F5',
+                'footerPadding': 10.0,
+                'footerBorderWidth': 2.0,
+                'footerFontSize': 10.0,
+                'showBorderAroundTable': true,
+                'useRoundCorners': false,
+                'useGradientHeader': false,
+                'showInvoiceNumberLarge': false,
+                'useCardStyleForSections': false,
+              },
+            )));
 
     final headerColor = _hexToColor(templateEntity.headerColor);
     final accentColor = _hexToColor(templateEntity.accentColor);
@@ -1034,44 +1049,63 @@ class PdfService {
             ?.toDouble() ??
         0.0;
 
-    // حساب المجاميع الإجمالية - موجبة وسالبة بشكل منفصل مع صافي نهائي
-    // المنطق مطابق لشاشة قائمة الفواتير: تصنيف حسب نوع الفاتورة
-    final grandTotalPositive = invoices.fold<double>(
-      0,
-      (sum, inv) {
+    // حساب الإجماليات العامة والرصيد المتبقي
+    double? grandRemaining;
+    double grandTotalPositive = 0;
+    double grandTotalNegative = 0;
+    double grandSalesReturn = 0;
+    double grandCashReceived = 0;
+    double grandCashGiven = 0;
+    double grandPaidFromRegular = 0;
+
+    if (customerDebt != null) {
+      grandRemaining = customerDebt;
+    } else {
+      for (final inv in invoices) {
         final isSalesReturn = inv.type == 'sales_return' || inv.isSalesReturn;
-        final isCashReceipt = inv.type == 'cash' &&
-            inv.isCashAccountReceipt &&
-            inv.effectiveCashTransactionType == 'receipt';
-        if (isSalesReturn || isCashReceipt) {
-          return sum; // سالبة - لا تضاف للموجبة
+
+        if (isSalesReturn) {
+          grandSalesReturn += inv.totalAmount.abs();
+          grandRemaining = (grandRemaining ?? 0) - inv.totalAmount.abs();
+        } else if (inv.type == 'cash') {
+          if (inv.cashTransactionType == 'payment') {
+            grandCashGiven += inv.totalAmount.abs();
+            grandRemaining = (grandRemaining ?? 0) + inv.totalAmount.abs();
+          } else {
+            grandCashReceived += inv.totalAmount.abs();
+            grandRemaining = (grandRemaining ?? 0) - inv.totalAmount.abs();
+          }
         } else {
-          return sum + inv.totalAmount; // موجبة (تزيد الدين)
+          final remaining = inv.totalAmount - inv.paidAmount;
+          grandRemaining = (grandRemaining ?? 0) + remaining;
+
+          if (inv.totalAmount == 0 && inv.paidAmount != 0) {
+            if (inv.paidAmount > 0) {
+              grandCashReceived += inv.paidAmount;
+            } else {
+              grandCashGiven += inv.paidAmount.abs();
+            }
+          } else if (remaining > 0) {
+            grandTotalPositive += inv.totalAmount;
+            if (inv.paidAmount > 0) {
+              grandPaidFromRegular += inv.paidAmount;
+            } else if (inv.paidAmount < 0) {
+              grandCashGiven += inv.paidAmount.abs();
+            }
+          } else {
+            grandTotalNegative += remaining.abs();
+          }
         }
-      },
-    );
-    final grandTotalNegative = invoices.fold<double>(
-      0,
-      (sum, inv) {
-        final isSalesReturn = inv.type == 'sales_return' || inv.isSalesReturn;
-        final isCashReceipt = inv.type == 'cash' &&
-            inv.isCashAccountReceipt &&
-            inv.effectiveCashTransactionType == 'receipt';
-        if (isSalesReturn || isCashReceipt) {
-          return sum + inv.totalAmount.abs(); // سالبة (تقلل الدين)
-        } else {
-          return sum; // موجبة - لا تضاف للسالبة
-        }
-      },
-    );
-    final grandPaid = invoices.fold<double>(
-      0,
-      (sum, inv) => sum + inv.paidAmount.abs(),
-    );
-    final grandRemaining = invoices.fold<double>(
-      0,
-      (sum, inv) => sum + inv.calculateRemainingAmount(),
-    );
+      }
+
+      grandRemaining =
+          grandTotalPositive -
+          grandTotalNegative -
+          grandSalesReturn -
+          grandCashReceived +
+          grandCashGiven -
+          grandPaidFromRegular;
+    }
 
     pdf.addPage(
       pw.MultiPage(
@@ -1118,8 +1152,8 @@ class PdfService {
                         style: pw.TextStyle(
                           fontSize:
                               (templateEntity
-                                      .customFields?['companyInfoFontSize']
-                                  as num?)
+                                          .customFields?['companyInfoFontSize']
+                                      as num?)
                                   ?.toDouble() ??
                               12.0,
                           color: PdfColors.white,
@@ -1161,7 +1195,7 @@ class PdfService {
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      'تقرير سجل الفواتير',
+                      _ar('سجل الفواتير'),
                       style: pw.TextStyle(
                         fontSize: titleFontSize,
                         fontWeight: pw.FontWeight.bold,
@@ -1170,7 +1204,7 @@ class PdfService {
                     ),
                     pw.SizedBox(height: 3),
                     pw.Text(
-                      _ar('تاريخ التوليد: ${_formatDateTime(DateTime.now())}'),
+                      _ar('تاريخ الطباعة: ${_formatDateTime(DateTime.now())}'),
                       style: pw.TextStyle(
                         fontSize: bodyFontSize - 1,
                         color: PdfColors.white,
@@ -1219,11 +1253,10 @@ class PdfService {
           ),
         ),
         build: (context) => <pw.Widget>[
-          // ===== صفحة الملخص (الغلاف) =====
-          // مسافة علوية لفصل المحتوى عن الهيدر (الشعار ومعلومات الشركة)
+          // مسافة أسفل الترويسة
           pw.SizedBox(height: 70),
 
-          // معلومات العميل (إذا كان للعميل المحدد)
+          // معلومات العميل عند توفر اسم العميل
           if (templateEntity.showCustomerInfo &&
               customerName != null &&
               customerName.isNotEmpty)
@@ -1263,22 +1296,22 @@ class PdfService {
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
-                         pw.Text(
-                           _ar('إجمالي الفواتير: ${invoices.length}'),
-                           style: pw.TextStyle(
+                        pw.Text(
+                          _ar('عدد الفواتير: ${invoices.length}'),
+                          style: pw.TextStyle(
                             fontSize:
                                 (templateEntity
-                                        .customFields?['customerInfoTextFontSize']
-                                    as num?)
+                                            .customFields?['customerInfoTextFontSize']
+                                        as num?)
                                     ?.toDouble() ??
                                 12.0,
                           ),
                         ),
                         pw.SizedBox(height: 4),
-                          pw.Text(
-                            _ar('اسم العميل: $customerName'),
-                            style: pw.TextStyle(
-                              fontSize:
+                        pw.Text(
+                          _ar('اسم العميل: $customerName'),
+                          style: pw.TextStyle(
+                            fontSize:
                                 (templateEntity
                                             .customFields?['customerInfoTextFontSize']
                                         as num?)
@@ -1307,7 +1340,7 @@ class PdfService {
                 pw.Padding(
                   padding: const pw.EdgeInsets.all(8),
                   child: pw.Text(
-                    _ar('قائمة الفواتير المصدرة'),
+                    _ar('ملخص الفواتير المسجلة'),
                     style: pw.TextStyle(
                       fontSize: headerFontSize,
                       fontWeight: pw.FontWeight.bold,
@@ -1318,31 +1351,29 @@ class PdfService {
                 pw.Table(
                   border: pw.TableBorder.all(color: accentColor, width: 0.5),
                   columnWidths: {
-                    0: const pw.FlexColumnWidth(1), // المبلغ (على اليمين في RTL)
-                    1: const pw.FlexColumnWidth(3), // رقم الفاتورة (وسط)
-                    2: const pw.FlexColumnWidth(0.25), // # (على اليسار في RTL)
+                    0: const pw.FlexColumnWidth(1),
+                    1: const pw.FlexColumnWidth(3),
+                    2: const pw.FlexColumnWidth(0.25),
                   },
                   children: [
                     pw.TableRow(
                       decoration: pw.BoxDecoration(color: headerColor),
                       children: [
                         _buildHistoryTableCell(_ar('المبلغ'), isHeader: true),
-                        _buildHistoryTableCell(_ar('رقم الفاتورة'), isHeader: true),
+                        _buildHistoryTableCell(
+                          _ar('رقم الفاتورة'),
+                          isHeader: true,
+                        ),
                         _buildHistoryTableCell('#', isHeader: true),
                       ],
                     ),
                     ...invoices.asMap().entries.map((entry) {
                       final index = entry.key + 1;
                       final inv = entry.value;
-                      final invIsSalesReturn = inv.type == 'sales_return' ||
-                          inv.isSalesReturn;
-                      final invIsCashReceipt = inv.type == 'cash' &&
-                          inv.isCashAccountReceipt &&
-                          inv.effectiveCashTransactionType == 'receipt';
-                      final invDebtEffect =
-                          invIsSalesReturn || invIsCashReceipt
-                              ? 'decrease'
-                              : 'increase';
+                      final invDebtEffect = _getInvoiceDebtEffect(
+                        inv,
+                        isSummary: true,
+                      );
                       return pw.TableRow(
                         children: [
                           _buildHistoryTableCell(
@@ -1361,7 +1392,7 @@ class PdfService {
           ),
           pw.SizedBox(height: 15),
 
-          // الإجماليات الإجمالية
+          // الإجماليات العامة
           pw.Container(
             padding: const pw.EdgeInsets.all(12),
             decoration: pw.BoxDecoration(
@@ -1369,53 +1400,27 @@ class PdfService {
               borderRadius: pw.BorderRadius.circular(6),
             ),
             child: pw.Column(
-               children: [
-                 // قيمة الفواتير (الموجبة - تزيد الدين) - أحمر
-                 _buildTotalRow(
-                   _ar('قيمة الفواتير:'),
-                   grandTotalPositive,
-                   fontSize: bodyFontSize,
-                   isBold: true,
-                   debtEffect: 'increase',
-                 ),
-                 pw.SizedBox(height: 4),
-                 // المبالغ المدفوعة - أخضر
-                 _buildTotalRow(
-                   _ar('المبالغ المدفوعة:'),
-                   grandPaid,
-                   fontSize: bodyFontSize,
-                   debtEffect: 'decrease',
-                 ),
-                 pw.SizedBox(height: 4),
-                 // مرجع البيع - أخضر (إذا وجد)
-                 if (grandTotalNegative > 0) ...[
-                   _buildTotalRow(
-                     _ar('مرجع البيع:'),
-                     grandTotalNegative,
-                     fontSize: bodyFontSize,
-                     debtEffect: 'decrease',
-                   ),
-                   pw.SizedBox(height: 4),
-                 ],
-                 // المتبقي
-                 _buildTotalRow(
-                   _ar('المتبقي:'),
-                   grandRemaining,
-                   fontSize: bodyFontSize,
-                   isBold: true,
-                   debtEffect: grandRemaining > 0 ? 'increase' : 'decrease',
-                 ),
-               ],
-             ),
+              children: [
+                _buildTotalRow(
+                  'المتبقي:',
+                  customerDebt ?? grandRemaining ?? 0,
+                  fontSize: bodyFontSize,
+                  isBold: true,
+                  debtEffect: (customerDebt ?? grandRemaining ?? 0) > 0
+                      ? 'increase'
+                      : 'decrease',
+                ),
+              ],
+            ),
           ),
           pw.SizedBox(height: 15),
-           pw.Text(
-            _ar('تفاصيل الفواتير المرفقة في الصفحات التالية'),
+          pw.Text(
+            _ar('تفاصيل الفواتير المسجلة في الكشف التفصيلي'),
             style: pw.TextStyle(fontSize: bodyFontSize, color: PdfColors.grey),
           ),
           pw.SizedBox(height: 15),
 
-          // == صفحات التفاصيل لكل فاتورة ==
+          // تفاصيل كل فاتورة
           ...invoices.expand(
             (invoice) => _buildInvoiceHistoryPageWidgets(
               invoice,
@@ -1428,7 +1433,6 @@ class PdfService {
               showCustomerInfoOnDetailPage: customerName == null,
             ),
           ),
-          // مسافة سفلية لفصل المحتوى عن التذييل (footer)
           pw.SizedBox(height: 60),
         ],
       ),
@@ -1440,7 +1444,7 @@ class PdfService {
     );
   }
 
-  /// بناء عناصر صفحة تفاصيل فاتورة واحدة باستخدام تنسيق القالب الأصلي
+  /// بناء عناصر تفاصيل الفاتورة داخل سجل الفواتير
   List<pw.Widget> _buildInvoiceHistoryPageWidgets(
     InvoiceEntity invoice, {
     required InvoiceTemplateEntity templateEntity,
@@ -1451,19 +1455,7 @@ class PdfService {
     required double tableCellPadding,
     bool showCustomerInfoOnDetailPage = false,
   }) {
-    // تحديد تأثير الدين بناءً على نوع الفاتورة
-    // فواتير مرجع البيع تقلل الدين (أخضر)، الفواتير العادية تزيد الدين (أحمر)
-    // الفواتير النقدية: استلام يقلل الدين (أخضر)، إعطاء يزيد الدين (أحمر)
-    final bool isSalesReturn = invoice.type == 'sales_return' ||
-        invoice.isSalesReturn;
-    final bool isCashReceipt = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'receipt';
-    final bool isCashPayment = invoice.type == 'cash' &&
-        invoice.isCashAccountReceipt &&
-        invoice.effectiveCashTransactionType == 'payment';
-    final String debtEffect =
-        isSalesReturn || isCashReceipt ? 'decrease' : 'increase';
+    final String debtEffect = _getInvoiceDebtEffect(invoice);
 
     return [
       pw.Container(
@@ -1472,36 +1464,36 @@ class PdfService {
         child: pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-              pw.Text(
-               _ar('تفاصيل الفاتورة'),
-               style: pw.TextStyle(
-                 fontSize: headerFontSize + 4,
-                 fontWeight: pw.FontWeight.bold,
-                 color: PdfColors.white,
-               ),
+            pw.Text(
+              _ar('تفاصيل الفاتورة'),
+              style: pw.TextStyle(
+                fontSize: headerFontSize + 4,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
               ),
-              pw.Text(
-                _ar('رقم: ${invoice.invoiceNumber}'),
-                style: pw.TextStyle(
-                  fontSize: bodyFontSize,
-                  color: PdfColors.white,
-                ),
+            ),
+            pw.Text(
+              _ar('رقم: ${invoice.invoiceNumber}'),
+              style: pw.TextStyle(
+                fontSize: bodyFontSize,
+                color: PdfColors.white,
               ),
+            ),
           ],
         ),
       ),
       pw.SizedBox(height: 12),
       if (showCustomerInfoOnDetailPage) ...[
-                pw.Text(
-                  _ar('رقم الهاتف: ${invoice.customerPhone}'),
-                  style: pw.TextStyle(fontSize: bodyFontSize),
-                ),
-                pw.Text(
-                  _ar('العميل: ${invoice.customerName}'),
-                  style: pw.TextStyle(fontSize: bodyFontSize),
-                ),
+        pw.Text(
+          _ar('الهاتف: ${invoice.customerPhone}'),
+          style: pw.TextStyle(fontSize: bodyFontSize),
+        ),
+        pw.Text(
+          _ar('العميل: ${invoice.customerName}'),
+          style: pw.TextStyle(fontSize: bodyFontSize),
+        ),
       ],
-       pw.Row(
+      pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(
@@ -1525,7 +1517,11 @@ class PdfService {
           children: [
             pw.Text(
               _ar(
-                'نوع المعاملة: ${invoice.effectiveCashTransactionType == 'receipt' ? 'استلام مبلغ من العميل' : invoice.effectiveCashTransactionType == 'payment' ? 'إعطاء مبلغ للعميل' : 'تصفية الحساب'}',
+                'نوع الحركة: ${invoice.cashTransactionType == 'receipt'
+                    ? 'مقبوض نقدي من العميل'
+                    : invoice.cashTransactionType == 'payment'
+                    ? 'مدفوع نقدي للعميل'
+                    : 'حركة نقدية'}',
               ),
               style: pw.TextStyle(
                 fontSize: bodyFontSize,
@@ -1536,48 +1532,78 @@ class PdfService {
         ),
       ],
       pw.SizedBox(height: 8),
-      if (invoice.items.isNotEmpty) ...[
+      // عرض جدول الأصناف دائمًا للفواتير النقدية، أو إذا كانت هناك أصناف
+      if (invoice.items.isNotEmpty || invoice.type == 'cash') ...[
         pw.Table(
           border: pw.TableBorder.all(color: accentColor, width: 0.5),
           columnWidths: {
-            0: const pw.FlexColumnWidth(1), // المجموع (على اليمين في RTL)
-            1: const pw.FlexColumnWidth(1), // السعر
-            2: const pw.FlexColumnWidth(0.5), // الكمية
-            3: const pw.FlexColumnWidth(3), // الصنف
-            4: const pw.FlexColumnWidth(0.5), // # (على اليسار في RTL)
+            0: const pw.FlexColumnWidth(1),
+            1: const pw.FlexColumnWidth(1),
+            2: const pw.FlexColumnWidth(0.5),
+            3: const pw.FlexColumnWidth(3),
+            4: const pw.FlexColumnWidth(0.5),
           },
           children: [
             pw.TableRow(
               decoration: pw.BoxDecoration(color: headerColor),
               children: [
-                _buildHistoryTableCell(_ar('المجموع'), isHeader: true),
-                _buildHistoryTableCell(_ar('السعر'), isHeader: true),
+                _buildHistoryTableCell(_ar('المبلغ'), isHeader: true),
+                _buildHistoryTableCell(_ar('سعر الوحدة'), isHeader: true),
                 _buildHistoryTableCell(_ar('الكمية'), isHeader: true),
-                _buildHistoryTableCell(_ar('الصنف'), isHeader: true),
+                _buildHistoryTableCell(_ar('الصنف / وصف'), isHeader: true),
                 _buildHistoryTableCell('#', isHeader: true),
               ],
             ),
-            ...invoice.items.asMap().entries.map((entry) {
-              final index = entry.key + 1;
-              final item = entry.value;
-              return pw.TableRow(
+            if (invoice.items.isEmpty && invoice.type == 'cash')
+              // صف توضيحي للفواتير النقدية بدون أصناف - يعرض المبلغ ونوع العملية
+              pw.TableRow(
                 children: [
                   _buildHistoryTableCell(
-                    _formatAmount(item.totalPrice),
+                    _formatAmount(
+                      invoice.totalAmount.abs(),
+                    ),
                     debtEffect: debtEffect,
                   ),
                   _buildHistoryTableCell(
-                    _formatAmount(item.unitPrice),
+                    _ar(
+                      invoice.cashTransactionType == 'receipt'
+                          ? 'مقبوض نقدي من العميل'
+                          : invoice.cashTransactionType == 'payment'
+                              ? 'مدفوع نقدي للعميل'
+                              : 'حركة نقدية',
+                    ),
                     debtEffect: debtEffect,
                   ),
+                  _buildHistoryTableCell('-', debtEffect: debtEffect),
                   _buildHistoryTableCell(
-                    item.quantity.toStringAsFixed(0),
+                    _ar(
+                      'فاتورة نقدية - ${invoice.cashTransactionType == 'receipt' ? 'استلام' : 'دفع'}',
+                    ),
+                    debtEffect: debtEffect,
                   ),
-                  _buildHistoryTableCell(_ar(item.productName)),
-                  _buildHistoryTableCell(index.toString()),
+                  _buildHistoryTableCell('-', debtEffect: debtEffect),
                 ],
-              );
-            }),
+              )
+            else
+              ...invoice.items.asMap().entries.map((entry) {
+                final index = entry.key + 1;
+                final item = entry.value;
+                return pw.TableRow(
+                  children: [
+                    _buildHistoryTableCell(
+                      _formatAmount(item.totalPrice),
+                      debtEffect: debtEffect,
+                    ),
+                    _buildHistoryTableCell(
+                      _formatAmount(item.unitPrice),
+                      debtEffect: debtEffect,
+                    ),
+                    _buildHistoryTableCell(item.quantity.toStringAsFixed(0)),
+                    _buildHistoryTableCell(_ar(item.productName)),
+                    _buildHistoryTableCell(index.toString()),
+                  ],
+                );
+              }),
           ],
         ),
         pw.SizedBox(height: 12),
@@ -1585,7 +1611,7 @@ class PdfService {
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
             pw.Text(
-              _ar('المبلغ الإجمالي:'),
+              _ar('إجمالي الفاتورة:'),
               style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
             pw.Text(
@@ -1594,19 +1620,24 @@ class PdfService {
             ),
             pw.Text(
               _ar('المتبقي:'),
-              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red),
+              style: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.red,
+              ),
             ),
           ],
         ),
         pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            // الإجمالي: increase (يزيد الدين) = أحمر، decrease (يقلل الدين) = أخضر
             pw.Container(
               color: debtEffect == 'increase'
                   ? _hexToColor('#FFEBEE')
                   : _hexToColor('#E8F5E9'),
-              padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 2,
+              ),
               child: pw.Text(
                 debtEffect == 'increase'
                     ? '+${_formatAmount(invoice.totalAmount.abs())}'
@@ -1614,42 +1645,52 @@ class PdfService {
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
             ),
-            // المدفوع: دائمًا decrease (يقلل دين العميل) = أخضر
             pw.Container(
-              color: _hexToColor('#E8F5E9'),
-              padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              color:
+                  (invoice.type == 'cash' &&
+                      invoice.isCashAccountReceipt &&
+                      invoice.cashTransactionType == 'payment')
+                  ? _hexToColor('#FFEBEE')
+                  : _hexToColor('#E8F5E9'),
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 2,
+              ),
               child: pw.Text(
-                '-${_formatAmount(invoice.paidAmount.abs())}',
+                (invoice.type == 'cash' &&
+                        invoice.isCashAccountReceipt &&
+                        invoice.cashTransactionType == 'payment')
+                    ? '+${_formatAmount(invoice.paidAmount.abs())}'
+                    : '-${_formatAmount(invoice.paidAmount.abs())}',
                 style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
               ),
             ),
-            // المتبقي: >0 = increase (دين متبق) = أحمر، <=0 = decrease (لا دين) = أخضر
             pw.Container(
-              color: invoice.calculateRemainingAmount() > 0
+              color: invoice.remainingAmount > 0 && invoice.isUnpaid
                   ? _hexToColor('#FFEBEE')
                   : _hexToColor('#E8F5E9'),
-              padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 4,
+                vertical: 2,
+              ),
               child: pw.Text(
-                invoice.calculateRemainingAmount() > 0
-                    ? '+${_formatAmount(invoice.calculateRemainingAmount().abs())}'
-                    : '-${_formatAmount(invoice.calculateRemainingAmount().abs())}',
-                style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red),
+                invoice.remainingAmount > 0 && invoice.isUnpaid
+                    ? '+${_formatAmount(invoice.remainingAmount.abs())}'
+                    : '-${_formatAmount(invoice.remainingAmount.abs())}',
+                style: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.red,
+                ),
               ),
             ),
           ],
         ),
       ],
       pw.SizedBox(height: 12),
-      if (invoice.notes != null && invoice.notes!.isNotEmpty) ...[
-        pw.SizedBox(height: 12),
-        pw.Text(
-          _ar('ملاحظات: ${invoice.notes}'),
-          style: pw.TextStyle(fontSize: bodyFontSize),
-        ),
-      ],
     ];
   }
 
+  /// بناء خلية جدول السجل مع دعم إشارة +/- وتلوين حالة الدين
   pw.Widget _buildHistoryTableCell(
     String text, {
     bool isHeader = false,
@@ -1658,9 +1699,8 @@ class PdfService {
     final dynamicBg = debtEffect == 'increase'
         ? _hexToColor('#FFEBEE')
         : debtEffect == 'decrease'
-            ? _hexToColor('#E8F5E9')
-            : null;
-    // إضافة إشارة (+ أو -) أمام المبلغ بناءً على تأثير الدين
+        ? _hexToColor('#E8F5E9')
+        : null;
     String displayText = text;
     if (debtEffect == 'increase') {
       displayText = '+$text';
@@ -1684,9 +1724,9 @@ class PdfService {
     );
   }
 
+  /// تنسيق التاريخ والوقت
   String _formatDateTime(DateTime date) {
     return '${date.year}/${date.month.toString().padLeft(2, '0')}/${date.day.toString().padLeft(2, '0')} '
         '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 }
-

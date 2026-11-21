@@ -1,10 +1,10 @@
 import 'package:collection/collection.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get_it/get_it.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../../core/mixins/save_operation_mixin.dart';
 import '../../../../core/permissions/permission_checker.dart';
@@ -116,6 +116,9 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
   bool _showManualReturnForm = false;
   bool _isLoadingSoldItems = false;
   int _soldItemsLoadGeneration = 0;
+  bool _initialDataLoadScheduled = false;
+  bool _customersLoadRequested = false;
+  bool _inventoryLoadRequested = false;
 
   // LayerLink و GlobalKey لعرض اقتراحات العملاء
   final LayerLink _customerLayerLink = LayerLink();
@@ -149,16 +152,6 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
           soldItem.productName == item.productName &&
           soldItem.originalInvoiceId == item.originalInvoiceId,
     );
-  }
-
-  void _refreshSoldItemsForCurrentCustomer() {
-    if (_selectedType != 'sales_return') return;
-    final customerId = _selectedCustomer?.id;
-    if (customerId == null || customerId.isEmpty) {
-      _loadAllSoldItems();
-    } else {
-      _loadSoldItemsForCustomer(customerId);
-    }
   }
 
   // حسابات الفاتورة
@@ -209,38 +202,28 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
     _cashAmountController.addListener(() {
       if (mounted) setState(() {});
     });
-    _loadPermissions();
-    _loadRelatedData();
-    if (_selectedType == 'sales_return') {
-      _refreshSoldItemsForCurrentCustomer();
-    }
+    // يتم تأجيل تحميل البيانات المرتبطة إلى ما بعد أول إطار حتى تظهر الشاشة
+    // مباشرة، مع تجنب تحميل المخزون غير المستخدم في مسار مرجع البيع.
   }
 
   Future<void> _loadPermissions() async {
-    final canCreateSales = await _permissionChecker.hasPermission(
+    final permissions = await _permissionChecker.hasPermissions([
       'invoices_sales_manage',
-    );
-    final canCreatePurchase = await _permissionChecker.hasPermission(
       'invoices_purchase_manage',
-    );
-    final canCreateCash = await _permissionChecker.hasPermission(
       'invoices_cash_manage',
-    );
-    final canCreateSubscription = await _permissionChecker.hasPermission(
       'invoices_subscription_manage',
-    );
-    final canCreateSalesReturn = await _permissionChecker.hasPermission(
       'invoices_sales_return_manage',
-    );
+    ]);
 
-    // تحديث UI بعد تحميل الصلاحيات
     if (mounted) {
       setState(() {
-        _canCreateSales = canCreateSales;
-        _canCreatePurchase = canCreatePurchase;
-        _canCreateCash = canCreateCash;
-        _canCreateSubscription = canCreateSubscription;
-        _canCreateSalesReturn = canCreateSalesReturn;
+        _canCreateSales = permissions['invoices_sales_manage'] ?? false;
+        _canCreatePurchase = permissions['invoices_purchase_manage'] ?? false;
+        _canCreateCash = permissions['invoices_cash_manage'] ?? false;
+        _canCreateSubscription =
+            permissions['invoices_subscription_manage'] ?? false;
+        _canCreateSalesReturn =
+            permissions['invoices_sales_return_manage'] ?? false;
       });
     }
   }
@@ -249,10 +232,25 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
   void didChangeDependencies() {
     super.didChangeDependencies();
 
+    final routeArguments =
+        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    if (!_initialDataLoadScheduled) {
+      _initialDataLoadScheduled = true;
+      final isSalesReturnRoute = routeArguments?['type'] == 'sales_return';
+      final hasRouteCustomer = routeArguments?['customerId'] is String;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadPermissions();
+        _loadRelatedData(
+          loadCustomers: !isSalesReturnRoute || !hasRouteCustomer,
+          loadInventory: !isSalesReturnRoute,
+        );
+      });
+    }
+
     // معالجة البيانات المرسلة من الصفحة السابقة
     if (!_argumentsProcessed) {
-      final arguments =
-          ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      final arguments = routeArguments;
       if (arguments != null) {
         // معالجة بيانات العميل المحدد (فاتورة عادية أو مرجع بيع)
         if (arguments.containsKey('customerId')) {
@@ -263,21 +261,13 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
           final invoiceType = arguments['type'] as String? ?? 'sales';
 
           if (customerId != null && customerName != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) async {
-              // إذا لم يتم تحميل العملاء بعد، ننتظر حتى يتم تحميلهم
-              if (_customers.isEmpty) {
-                await Future.delayed(const Duration(milliseconds: 500));
-              }
-              if (mounted) {
-                await _processCustomerArguments(
-                  customerId,
-                  customerName,
-                  customerPhone,
-                  invoiceType,
-                  customerTotalDebt: customerTotalDebt,
-                );
-              }
-            });
+            _processCustomerArguments(
+              customerId,
+              customerName,
+              customerPhone,
+              invoiceType,
+              customerTotalDebt: customerTotalDebt,
+            );
           }
         }
         if (arguments.containsKey('subscriptionData')) {
@@ -313,24 +303,9 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
       }
     }
 
-    // 2) إذا لم يتم العثور على العميل، نجلب بياناته من السيرفر
-    if (matchingCustomer == null && customerId.isNotEmpty) {
-      try {
-        final customerRepository = GetIt.instance<CustomerRepository>();
-        final customerResult = await customerRepository.getCustomerById(
-          customerId,
-          forceRefresh: true,
-        );
-        matchingCustomer = customerResult.fold(
-          (failure) => null,
-          (customer) => customer,
-        );
-      } on Exception catch (_) {
-        matchingCustomer = null;
-      }
-    }
-
-    // 3) إذا لم يتم العثور على العميل حتى من السيرفر، ننشئ عميلاً مؤقتاً
+    // عند فتح الشاشة من بطاقة العميل، نستخدم البيانات الممررة مباشرة بدلاً من
+    // انتظار قراءة شبكية ثانية قبل تحميل فواتير المرجع.
+    // إذا لم يتم العثور على العميل محلياً، ننشئ عميلاً مؤقتاً من بيانات المسار.
     if (matchingCustomer == null) {
       final user = FirebaseAuth.instance.currentUser;
       matchingCustomer = CustomerEntity(
@@ -754,14 +729,22 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
     });
   }
 
-  void _loadRelatedData() {
+  void _loadRelatedData({
+    bool loadCustomers = true,
+    bool loadInventory = true,
+  }) {
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null && user.email != null) {
-      // تحميل العملاء
-      context.read<CustomerBloc>().add(LoadCustomersEvent(user.email!));
-      // تحميل المنتجات
+    final email = user?.email;
+    if (email == null) return;
+
+    if (loadCustomers && !_customersLoadRequested) {
+      _customersLoadRequested = true;
+      context.read<CustomerBloc>().add(LoadCustomersEvent(email));
+    }
+    if (loadInventory && !_inventoryLoadRequested) {
+      _inventoryLoadRequested = true;
       context.read<InventoryBloc>().add(
-        LoadInventoryData(organizationEmail: user.email!),
+        LoadInventoryData(organizationEmail: email),
       );
     }
   }
@@ -787,8 +770,11 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
 
       final invoiceBloc = GetIt.instance.get<InvoiceBloc>();
 
-      // جلب فواتير العميل
-      final result = await invoiceBloc.repository.getInvoices(user!.email!);
+      // جلب فواتير العميل فقط، بدلاً من تنزيل فواتير المؤسسة كاملة.
+      final result = await invoiceBloc.repository.getInvoices(
+        user!.email!,
+        customerId: customerId,
+      );
 
       await result.fold((failure) async {}, (invoices) async {
         // فلترة فواتير العميل المحدد
@@ -844,73 +830,6 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
     }
   }
 
-  /// جلب جميع المواد المشتراة من جميع الفواتير (عند عدم تحديد عميل)
-  Future<void> _loadAllSoldItems() async {
-    final generation = ++_soldItemsLoadGeneration;
-    if (!mounted) return;
-    setState(() {
-      _isLoadingSoldItems = true;
-      _soldItems = [];
-      _filteredSoldItems = [];
-      _selectedSoldItem = null;
-    });
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user?.email == null) return;
-
-      final invoiceBloc = GetIt.instance.get<InvoiceBloc>();
-
-      // جلب جميع الفواتير
-      final result = await invoiceBloc.repository.getInvoices(user!.email!);
-
-      await result.fold((failure) async {}, (invoices) async {
-        final items = <InvoiceItemEntity>[];
-        for (final invoice in invoices) {
-          // تخطي الفواتير المؤرشفة وفواتير مرجع البيع
-          if (invoice.isArchived ||
-              invoice.isSalesReturn ||
-              invoice.type == 'sales_return') {
-            continue;
-          }
-
-          // إضافة المواد من كل فاتورة مع معلومات الفاتورة
-          for (final item in invoice.items) {
-            items.add(
-              InvoiceItemEntity(
-                productName: item.productName,
-                productId: item.productId,
-                originalQuantity: item.quantity.abs(),
-                quantity: item.quantity.abs(),
-                unit: item.unit,
-                unitPrice: item.unitPrice,
-                totalPrice: item.totalPrice,
-                itemId: item.itemId,
-                originalInvoiceId: invoice.id,
-                originalInvoiceNumber: invoice.invoiceNumber,
-                originalSaleDate: invoice.invoiceDate,
-              ),
-            );
-          }
-        }
-
-        final itemsWithReturnBalances = _applyPreviouslyReturnedQuantities(
-          items,
-          invoices,
-        );
-        if (!mounted || generation != _soldItemsLoadGeneration) return;
-        setState(() {
-          _isLoadingSoldItems = false;
-          _soldItems = itemsWithReturnBalances;
-          _filteredSoldItems = List.from(itemsWithReturnBalances);
-        });
-      });
-    } on Exception catch (_) {
-      if (mounted && generation == _soldItemsLoadGeneration) {
-        setState(() => _isLoadingSoldItems = false);
-      }
-    }
-  }
-
   /// عرض اقتراحات العملاء
   void _showCustomerSuggestionsOverlay() {
     if (_filteredCustomers.isEmpty) return;
@@ -938,7 +857,7 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
           _selectedCustomer = customer;
           _customerSearchController.text = customer.name;
 
-          // جلب المواد المباعة للعميل إذا كانت فاتورة مرجع بيع
+          // جلب مواد العميل عند اختيار عميل لمرجع البيع.
           if (_selectedType == 'sales_return') {
             _loadSoldItemsForCustomer(customer.id);
           }
@@ -953,6 +872,7 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
     List<InvoiceEntity> invoices, {
     String? customerId,
   }) {
+    final invoicesById = {for (final invoice in invoices) invoice.id: invoice};
     final returnedBySaleItem = <String, double>{};
     for (final returnInvoice in invoices) {
       if (!returnInvoice.isSalesReturn ||
@@ -965,22 +885,24 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
             returnedItem.itemId.startsWith('manual_return_')) {
           continue;
         }
-        final saleInvoice = invoices.firstWhereOrNull(
-          (invoice) =>
-              invoice.id == returnedItem.originalInvoiceId &&
-              !invoice.isArchived &&
-              (customerId == null || invoice.customerId == customerId),
-        );
-        if (saleInvoice == null) continue;
+        final saleInvoice = invoicesById[returnedItem.originalInvoiceId];
+        if (saleInvoice == null ||
+            saleInvoice.isArchived ||
+            (customerId != null && saleInvoice.customerId != customerId)) {
+          continue;
+        }
         final sourceItem = saleInvoice.items.firstWhereOrNull(
           (item) =>
-              item.itemId == returnedItem.itemId ||
+              (item.itemId != null &&
+                  item.itemId == returnedItem.itemId &&
+                  item.productName == returnedItem.itemName) ||
               (item.itemId == null &&
                   item.productName == returnedItem.itemName),
         );
         if (sourceItem == null) continue;
         final sourceItemId = sourceItem.itemId ?? sourceItem.productName;
-        final key = '${sourceItemId}_${saleInvoice.id}';
+        final key =
+            '${sourceItemId}_${sourceItem.productName}_${saleInvoice.id}';
         returnedBySaleItem.update(
           key,
           (quantity) => quantity + returnedItem.returnedQuantity,
@@ -992,7 +914,8 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
     return soldItems.map((item) {
       final originalQuantity = item.originalQuantity ?? item.quantity;
       final itemId = item.itemId ?? item.productName;
-      final key = '${itemId}_${item.originalInvoiceId ?? ''}';
+      final key =
+          '${itemId}_${item.productName}_${item.originalInvoiceId ?? ''}';
       final returnedQuantity = returnedBySaleItem[key] ?? 0;
       final remainingQuantity = (originalQuantity - returnedQuantity).clamp(
         0.0,
@@ -1466,6 +1389,12 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                       ? IconButton(
                           icon: const Icon(Icons.clear),
                           onPressed: () {
+                            if (_selectedType == 'sales_return') {
+                              _loadRelatedData(
+                                loadCustomers: true,
+                                loadInventory: false,
+                              );
+                            }
                             setState(() {
                               _customerSearchController.clear();
                               _filteredCustomers = List.from(_customers);
@@ -1503,6 +1432,12 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                       _filteredCustomers = List.from(_customers);
                       _hideCustomerSuggestionsOverlay();
                       _selectedCustomer = null;
+                      if (_selectedType == 'sales_return') {
+                        _soldItemsLoadGeneration++;
+                        _soldItems = [];
+                        _filteredSoldItems = [];
+                        _selectedSoldItem = null;
+                      }
                     } else {
                       _filteredCustomers = _customers
                           .where(
@@ -1529,7 +1464,6 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                           _selectedCustomer = exactMatch;
                           _hideCustomerSuggestionsOverlay();
 
-                          // جلب المواد المباعة للعميل إذا كانت فاتورة مرجع بيع
                           if (_selectedType == 'sales_return') {
                             _loadSoldItemsForCustomer(exactMatch.id);
                           }
@@ -1537,9 +1471,11 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                       } else {
                         setState(() {
                           _selectedCustomer = null;
-                          // عند إلغاء تحديد العميل في وضع مرجع البيع، تحميل جميع المواد
                           if (_selectedType == 'sales_return') {
-                            _loadAllSoldItems();
+                            _soldItemsLoadGeneration++;
+                            _soldItems = [];
+                            _filteredSoldItems = [];
+                            _selectedSoldItem = null;
                           }
                         });
                       }
@@ -1991,15 +1927,22 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                 final currentInvoiceReturnQuantity = _invoiceItems
                     .where(
                       (line) =>
-                          line.itemId == item.itemId &&
-                          line.originalInvoiceId == item.originalInvoiceId,
+                          line.productName == item.productName &&
+                          line.originalInvoiceId == item.originalInvoiceId &&
+                          (item.itemId != null
+                              ? line.itemId == item.itemId
+                              : line.itemId == null),
                     )
                     .fold<double>(0, (sum, line) => sum + line.quantity);
+                final totalReturnedQuantity =
+                    (item.returnedQuantity ?? 0) + currentInvoiceReturnQuantity;
                 final availableReturnQuantity =
                     (item.quantity - currentInvoiceReturnQuantity).clamp(
                       0.0,
                       double.infinity,
                     );
+                final isReturnUnavailable = availableReturnQuantity <= 0;
+                final hasReturnedQuantity = totalReturnedQuantity > 0;
                 return DecoratedBox(
                   decoration: BoxDecoration(
                     border:
@@ -2010,124 +1953,129 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                         ? Border(bottom: BorderSide(color: Colors.grey[200]!))
                         : null,
                   ),
-                  child: ListTile(
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 16.w,
-                      vertical: 8.h,
-                    ),
-                    tileColor:
-                        item.returnedQuantity != null &&
-                            item.returnedQuantity! > 0
-                        ? Colors.orange.withValues(alpha: 0.05)
-                        : null, // ✅ تمييز المواد المرتجعة مسبقاً
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.productName,
-                            style: TextStyle(
-                              fontSize: 16.sp,
-                              fontWeight: FontWeight.w600,
-                              color:
-                                  item.returnedQuantity != null &&
-                                      item.returnedQuantity! > 0
-                                  ? Colors.orange[700]
-                                  : AssyrianTheme.deepBlue,
-                            ),
-                          ),
-                        ),
-                        // ✅ أيقونة تمييز المواد المرتجعة مسبقاً
-                        if (item.returnedQuantity != null &&
-                            item.returnedQuantity! > 0)
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: 6.w,
-                              vertical: 2.h,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.orange,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.refresh,
-                                  size: 12.sp,
-                                  color: Colors.white,
-                                ),
-                                SizedBox(width: 4.w),
-                                Text(
-                                  'تم إرجاع ${item.returnedQuantity}',
-                                  style: TextStyle(
-                                    fontSize: 10.sp,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SizedBox(height: 4.h),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.attach_money,
-                              size: 14.sp,
-                              color: Colors.grey[600],
-                            ),
-                            SizedBox(width: 4.w),
-                            Text(
-                              _formattingService.formatCurrency(item.unitPrice),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 16.w,
+                        vertical: 8.h,
+                      ),
+                      tileColor: isReturnUnavailable
+                          ? Colors.red.withValues(alpha: 0.08)
+                          : hasReturnedQuantity
+                          ? Colors.orange.withValues(alpha: 0.05)
+                          : null, // تمييز المواد المرتجعة أو غير المتاحة
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.productName,
                               style: TextStyle(
-                                fontSize: 14.sp,
-                                color: Colors.grey[700],
-                                fontWeight: FontWeight.w500,
+                                fontSize: 16.sp,
+                                fontWeight: FontWeight.w600,
+                                color: isReturnUnavailable
+                                    ? Colors.red[700]
+                                    : hasReturnedQuantity
+                                    ? Colors.orange[700]
+                                    : AssyrianTheme.deepBlue,
                               ),
                             ),
-                          ],
-                        ),
-                        SizedBox(height: 4.h),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.inventory_2,
-                              size: 14.sp,
-                              color: Colors.grey[600],
-                            ),
-                            SizedBox(width: 4.w),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                          ),
+                          // ✅ أيقونة تمييز المواد المرتجعة مسبقاً
+                          if (isReturnUnavailable || hasReturnedQuantity)
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 6.w,
+                                vertical: 2.h,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isReturnUnavailable
+                                    ? Colors.red[700]
+                                    : Colors.orange,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  // ✅ عرض الكمية المشتراة والمرجعة
-                                  RichText(
-                                    text: TextSpan(
-                                      style: TextStyle(
-                                        fontSize: 12.sp,
-                                        color: Colors.grey[700],
-                                      ),
-                                      children: [
-                                        TextSpan(text: 'الكمية المشتراة: '),
-                                        TextSpan(
-                                          text:
-                                              '${(item.originalQuantity ?? item.quantity).toStringAsFixed(2)} ${item.unit} ',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: AssyrianTheme.deepBlue,
-                                          ),
-                                        ),
-                                      ],
+                                  Icon(
+                                    Icons.refresh,
+                                    size: 12.sp,
+                                    color: Colors.white,
+                                  ),
+                                  SizedBox(width: 4.w),
+                                  Text(
+                                    isReturnUnavailable
+                                        ? 'غير قابل للإرجاع'
+                                        : 'تم إرجاع ${totalReturnedQuantity.toStringAsFixed(2)}',
+                                    style: TextStyle(
+                                      fontSize: 10.sp,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
                                     ),
                                   ),
-                                  // ✅ عرض الكمية المرتجعة إن وجدت
-                                  if (item.returnedQuantity != null &&
-                                      item.returnedQuantity! > 0)
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SizedBox(height: 4.h),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.attach_money,
+                                size: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                              SizedBox(width: 4.w),
+                              Text(
+                                _formattingService.formatCurrency(
+                                  item.unitPrice,
+                                ),
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 4.h),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.inventory_2,
+                                size: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                              SizedBox(width: 4.w),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // ✅ عرض الكمية المشتراة والمرجعة
+                                    RichText(
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                          fontSize: 12.sp,
+                                          color: Colors.grey[700],
+                                        ),
+                                        children: [
+                                          TextSpan(text: 'الكمية المشتراة: '),
+                                          TextSpan(
+                                            text:
+                                                '${(item.originalQuantity ?? item.quantity).toStringAsFixed(2)} ${item.unit} ',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: AssyrianTheme.deepBlue,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    // إظهار المرتجع السابق والمتبقي دائماً، حتى إن لم يسبق إرجاع شيء.
                                     RichText(
                                       text: TextSpan(
                                         style: TextStyle(
@@ -2135,101 +2083,106 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                                           color: Colors.grey[600],
                                         ),
                                         children: [
-                                          TextSpan(text: '(تم إرجاع '),
+                                          const TextSpan(text: 'تم إرجاع: '),
                                           TextSpan(
                                             text:
-                                                '${item.returnedQuantity} ${item.unit} ',
+                                                '${totalReturnedQuantity.toStringAsFixed(2)} ${item.unit}',
                                             style: TextStyle(
                                               fontWeight: FontWeight.bold,
                                               color: Colors.orange[700],
                                             ),
                                           ),
-                                          TextSpan(text: '، المتبقي '),
+                                          const TextSpan(
+                                            text: '  |  المتاح للإرجاع: ',
+                                          ),
                                           TextSpan(
                                             text:
-                                                '${item.quantity.toStringAsFixed(2)} ${item.unit}',
+                                                '${availableReturnQuantity.toStringAsFixed(2)} ${item.unit}',
                                             style: TextStyle(
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.green[700],
+                                              color: isReturnUnavailable
+                                                  ? Colors.red[700]
+                                                  : Colors.green[700],
                                             ),
                                           ),
-                                          TextSpan(text: ')'),
                                         ],
                                       ),
                                     ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 4.h),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.receipt_long,
-                              size: 14.sp,
-                              color: Colors.grey[600],
-                            ),
-                            SizedBox(width: 4.w),
-                            Expanded(
-                              child: Text(
-                                'فاتورة: ${item.originalInvoiceNumber ?? 'غير متوفر'}',
+                            ],
+                          ),
+                          SizedBox(height: 4.h),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.receipt_long,
+                                size: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                              SizedBox(width: 4.w),
+                              Expanded(
+                                child: Text(
+                                  'فاتورة: ${item.originalInvoiceNumber ?? 'غير متوفر'}',
+                                  style: TextStyle(
+                                    fontSize: 11.sp,
+                                    color: Colors.grey[600],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 4.h),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.calendar_today,
+                                size: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                              SizedBox(width: 4.w),
+                              Text(
+                                'تاريخ البيع: ${_formattingService.formatDate(item.originalSaleDate ?? DateTime.now())}',
                                 style: TextStyle(
                                   fontSize: 11.sp,
                                   color: Colors.grey[600],
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 4.h),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 14.sp,
-                              color: Colors.grey[600],
-                            ),
-                            SizedBox(width: 4.w),
-                            Text(
-                              'تاريخ البيع: ${_formattingService.formatDate(item.originalSaleDate ?? DateTime.now())}',
-                              style: TextStyle(
-                                fontSize: 11.sp,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
+                      onTap: isReturnUnavailable
+                          ? null
+                          : () {
+                              setState(() {
+                                _selectedSoldItem = item;
+                                _selectedProduct = ProductEntity(
+                                  id:
+                                      item.itemId ??
+                                      item.productName, // استخدام itemId إن وجد
+                                  organizationEmail: '',
+                                  name: item.productName,
+                                  quantity: item.quantity,
+                                  unit: item.unit,
+                                  sellingPrice: item.unitPrice,
+                                  minQuantity: 0,
+                                  createdBy: '',
+                                  createdAt: DateTime.now(),
+                                  updatedAt: DateTime.now(),
+                                  description:
+                                      'REF:${item.originalInvoiceNumber ?? ''}', // حفظ رقم الفاتورة في الوصف
+                                );
+                                _productSearchController.text =
+                                    item.productName;
+                                _quantityController.text =
+                                    availableReturnQuantity.toString();
+                                _showSoldItemsSuggestions = false;
+                              });
+                            },
                     ),
-                    onTap: availableReturnQuantity <= 0
-                        ? null
-                        : () {
-                            setState(() {
-                              _selectedSoldItem = item;
-                              _selectedProduct = ProductEntity(
-                                id:
-                                    item.itemId ??
-                                    item.productName, // استخدام itemId إن وجد
-                                organizationEmail: '',
-                                name: item.productName,
-                                quantity: item.quantity,
-                                unit: item.unit,
-                                sellingPrice: item.unitPrice,
-                                minQuantity: 0,
-                                createdBy: '',
-                                createdAt: DateTime.now(),
-                                updatedAt: DateTime.now(),
-                                description:
-                                    'REF:${item.originalInvoiceNumber ?? ''}', // حفظ رقم الفاتورة في الوصف
-                              );
-                              _productSearchController.text = item.productName;
-                              _quantityController.text = availableReturnQuantity
-                                  .toString();
-                              _showSoldItemsSuggestions = false;
-                            });
-                          },
                   ),
                 );
               },
@@ -3351,17 +3304,21 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
         ),
         items: items,
         onChanged: (value) {
+          if (value != 'sales_return') {
+            _loadRelatedData(loadCustomers: true, loadInventory: true);
+          }
           setState(() {
             _selectedType = value!;
 
-            // عند اختيار فاتورة مرجع بيع، تحميل المواد المشتراة
+            // لا نحمّل المواد حتى يُحدَّد العميل، لتفادي تنزيل فواتير المؤسسة كاملة.
             if (_selectedType == 'sales_return') {
               if (_selectedCustomer != null) {
-                // تحميل مواد العميل المحدد
                 _loadSoldItemsForCustomer(_selectedCustomer!.id);
               } else {
-                // تحميل جميع المواد من جميع الفواتير
-                _loadAllSoldItems();
+                _soldItemsLoadGeneration++;
+                _soldItems = [];
+                _filteredSoldItems = [];
+                _selectedSoldItem = null;
               }
             } else if (_selectedType != 'sales_return') {
               // تفريغ قائمة المواد المشتراة عند الخروج من وضع المرجع
@@ -4084,97 +4041,100 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
               borderRadius: BorderRadius.circular(8.r),
               border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ListTile(
-                  // ignore: deprecated_member_use
-                  leading: Radio<String>(
-                    value: 'credit',
+            child: Material(
+              color: Colors.transparent,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
                     // ignore: deprecated_member_use
-                    groupValue: _refundMethod,
-                    // ignore: deprecated_member_use
-                    onChanged: (value) {
+                    leading: Radio<String>(
+                      value: 'credit',
+                      // ignore: deprecated_member_use
+                      groupValue: _refundMethod,
+                      // ignore: deprecated_member_use
+                      onChanged: (value) {
+                        setState(() {
+                          _refundMethod = value;
+                        });
+                      },
+                    ),
+                    title: Text(
+                      'خصم من حساب العميل',
+                      style: TextStyle(
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange[900],
+                      ),
+                    ),
+                    subtitle: Padding(
+                      padding: EdgeInsets.only(top: 4.h),
+                      child: Text(
+                        _selectedCustomer != null
+                            ? _selectedCustomer!.totalDebt > 0
+                                  ? 'الحساب الحالي (عليك): ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt)}'
+                                  : _selectedCustomer!.totalDebt < 0
+                                  ? 'الحساب الحالي (لك): ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt.abs())}'
+                                  : 'الحساب الحالي: ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt)}'
+                            : 'لا يوجد عميل محدد',
+                        style: TextStyle(
+                          fontSize: 12.sp,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    dense: false,
+                    visualDensity: VisualDensity.compact,
+                    onTap: () {
                       setState(() {
-                        _refundMethod = value;
+                        _refundMethod = 'credit';
                       });
                     },
                   ),
-                  title: Text(
-                    'خصم من حساب العميل',
-                    style: TextStyle(
-                      fontSize: 14.sp,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[900],
+                  SizedBox(height: 8.h),
+                  ListTile(
+                    // ignore: deprecated_member_use
+                    leading: Radio<String>(
+                      value: 'cash',
+                      // ignore: deprecated_member_use
+                      groupValue: _refundMethod,
+                      // ignore: deprecated_member_use
+                      onChanged: (value) {
+                        setState(() {
+                          _refundMethod = value;
+                        });
+                      },
                     ),
-                  ),
-                  subtitle: Padding(
-                    padding: EdgeInsets.only(top: 4.h),
-                    child: Text(
-                      _selectedCustomer != null
-                          ? _selectedCustomer!.totalDebt > 0
-                                ? 'الحساب الحالي (عليك): ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt)}'
-                                : _selectedCustomer!.totalDebt < 0
-                                ? 'الحساب الحالي (لك): ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt.abs())}'
-                                : 'الحساب الحالي: ${_formattingService.formatCurrency(_selectedCustomer!.totalDebt)}'
-                          : 'لا يوجد عميل محدد',
+                    title: Text(
+                      'رد نقداً',
                       style: TextStyle(
-                        fontSize: 12.sp,
-                        color: Colors.grey[700],
+                        fontSize: 14.sp,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange[900],
                       ),
                     ),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  dense: false,
-                  visualDensity: VisualDensity.compact,
-                  onTap: () {
-                    setState(() {
-                      _refundMethod = 'credit';
-                    });
-                  },
-                ),
-                SizedBox(height: 8.h),
-                ListTile(
-                  // ignore: deprecated_member_use
-                  leading: Radio<String>(
-                    value: 'cash',
-                    // ignore: deprecated_member_use
-                    groupValue: _refundMethod,
-                    // ignore: deprecated_member_use
-                    onChanged: (value) {
+                    subtitle: Padding(
+                      padding: EdgeInsets.only(top: 4.h),
+                      child: Text(
+                        'سيتم رد المبلغ نقداً للعميل',
+                        style: TextStyle(
+                          fontSize: 12.sp,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                    dense: false,
+                    visualDensity: VisualDensity.compact,
+                    onTap: () {
                       setState(() {
-                        _refundMethod = value;
+                        _refundMethod = 'cash';
                       });
                     },
                   ),
-                  title: Text(
-                    'رد نقداً',
-                    style: TextStyle(
-                      fontSize: 14.sp,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.orange[900],
-                    ),
-                  ),
-                  subtitle: Padding(
-                    padding: EdgeInsets.only(top: 4.h),
-                    child: Text(
-                      'سيتم رد المبلغ نقداً للعميل',
-                      style: TextStyle(
-                        fontSize: 12.sp,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                  ),
-                  contentPadding: EdgeInsets.zero,
-                  dense: false,
-                  visualDensity: VisualDensity.compact,
-                  onTap: () {
-                    setState(() {
-                      _refundMethod = 'cash';
-                    });
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -4429,51 +4389,54 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
                       color: Colors.grey.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Column(
-                      children: _taxes.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final tax = entry.value;
-                        final taxName = tax['name'] as String;
-                        final taxRate = tax['rate'] as double;
-                        final taxAmountValue = tax['amount'] as double;
-                        final isPercentage = tax['isPercentage'] as bool;
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Column(
+                        children: _taxes.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final tax = entry.value;
+                          final taxName = tax['name'] as String;
+                          final taxRate = tax['rate'] as double;
+                          final taxAmountValue = tax['amount'] as double;
+                          final isPercentage = tax['isPercentage'] as bool;
 
-                        return ListTile(
-                          dense: true,
-                          title: Text(
-                            taxName,
-                            style: TextStyle(
-                              fontSize: 14.sp,
-                              color: Colors.black,
-                              fontWeight: FontWeight.w600,
+                          return ListTile(
+                            dense: true,
+                            title: Text(
+                              taxName,
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                color: Colors.black,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                          subtitle: Text(
-                            isPercentage && taxRate > 0
-                                ? '${_formattingService.formatCurrency(taxAmountValue)} (${taxRate.toStringAsFixed(1)}%)'
-                                : _formattingService.formatCurrency(
-                                    taxAmountValue,
-                                  ),
-                            style: TextStyle(
-                              fontSize: 12.sp,
-                              color: Colors.grey[700],
+                            subtitle: Text(
+                              isPercentage && taxRate > 0
+                                  ? '${_formattingService.formatCurrency(taxAmountValue)} (${taxRate.toStringAsFixed(1)}%)'
+                                  : _formattingService.formatCurrency(
+                                      taxAmountValue,
+                                    ),
+                              style: TextStyle(
+                                fontSize: 12.sp,
+                                color: Colors.grey[700],
+                              ),
                             ),
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(
-                              Icons.delete,
-                              color: Colors.red,
-                              size: 20,
+                            trailing: IconButton(
+                              icon: const Icon(
+                                Icons.delete,
+                                color: Colors.red,
+                                size: 20,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _taxes.removeAt(index);
+                                  _calculateTotalTax();
+                                });
+                              },
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _taxes.removeAt(index);
-                                _calculateTotalTax();
-                              });
-                            },
-                          ),
-                        );
-                      }).toList(),
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ),
                   // عرض إجمالي الضرائب
@@ -5404,14 +5367,20 @@ class _CreateInvoicePageState extends State<CreateInvoicePage>
         final alreadyReturnedOnThisInvoice = _invoiceItems
             .where(
               (line) =>
-                  line.itemId == soldItem.itemId &&
-                  line.originalInvoiceId == soldItem.originalInvoiceId,
+                  line.productName == soldItem.productName &&
+                  line.originalInvoiceId == soldItem.originalInvoiceId &&
+                  (soldItem.itemId != null
+                      ? line.itemId == soldItem.itemId
+                      : line.itemId == null),
             )
             .fold<double>(0, (sum, line) => sum + line.quantity);
         final editedLineQuantity =
             currentItem != null &&
-                currentItem.itemId == soldItem.itemId &&
-                currentItem.originalInvoiceId == soldItem.originalInvoiceId
+                currentItem.productName == soldItem.productName &&
+                currentItem.originalInvoiceId == soldItem.originalInvoiceId &&
+                (soldItem.itemId != null
+                    ? currentItem.itemId == soldItem.itemId
+                    : currentItem.itemId == null)
             ? currentItem.quantity
             : 0.0;
         final availableQuantity =

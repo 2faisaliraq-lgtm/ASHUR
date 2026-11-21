@@ -37,9 +37,7 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
           _enabledModules = modules;
         });
       }
-    } on Exception catch (e) {
-      // توثيق الخطأ للمبرمجين المستقبليين: فشل تحميل الوحدات المفعلة
-      debugPrint('خطأ في تحميل الوحدات المفعلة: $e');
+    } on Exception catch (_) {
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -63,9 +61,7 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
           _isLoading = false;
         });
       }
-    } on Exception catch (e) {
-      // توثيق الخطأ للمبرمجين المستقبليين: فشل تحميل صلاحيات المستخدم
-      debugPrint('خطأ في تحميل صلاحيات المستخدم: $e');
+    } on Exception catch (_) {
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -215,7 +211,8 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
                 thickness: 1,
               ),
             ),
-            if (_isModuleEnabled('settings_view') && _hasPermission('settings_view'))
+            if (_isModuleEnabled('settings_view') &&
+                _hasPermission('settings_view'))
               _buildDrawerItem(context, Icons.settings, 'الإعدادات', () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/settings/list');
@@ -319,27 +316,30 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
               )
             : null,
       ),
-      child: ListTile(
-        leading: Container(
-          padding: EdgeInsets.all(8.w),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color.withValues(alpha: 0.1),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          leading: Container(
+            padding: EdgeInsets.all(8.w),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.1),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Icon(icon, color: color, size: 20.sp),
           ),
-          child: Icon(icon, color: color, size: 20.sp),
-        ),
-        title: Text(
-          title,
-          style: AssyrianTheme.bodyStyle.copyWith(
-            color: color,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-            fontSize: 16.sp,
+          title: Text(
+            title,
+            style: AssyrianTheme.bodyStyle.copyWith(
+              color: color,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+              fontSize: 16.sp,
+            ),
           ),
-        ),
-        onTap: onTap,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12.r),
+          onTap: onTap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12.r),
+          ),
         ),
       ),
     );
@@ -376,7 +376,3 @@ class _DashboardDrawerState extends State<DashboardDrawer> {
     }
   }
 }
-
-
-
-

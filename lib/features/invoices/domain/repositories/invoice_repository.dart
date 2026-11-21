@@ -13,6 +13,7 @@ abstract class InvoiceRepository {
   Future<Either<Failure, List<InvoiceEntity>>> getInvoices(
     String organizationEmail, {
     int? limit,
+    String? customerId,
   });
 
   /// الحصول على الفواتير المؤرشفة فقط

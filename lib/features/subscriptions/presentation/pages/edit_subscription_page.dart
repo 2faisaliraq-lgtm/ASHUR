@@ -1386,11 +1386,13 @@ class _EditSubscriptionPageState extends State<EditSubscriptionPage>
                         ? Border(bottom: BorderSide(color: Colors.grey[200]!))
                         : null,
                   ),
-                  child: ListTile(
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 16.w,
-                      vertical: 8.h,
-                    ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 16.w,
+                        vertical: 8.h,
+                      ),
                     title: Text(
                       customer.name,
                       style: TextStyle(
@@ -1452,8 +1454,9 @@ class _EditSubscriptionPageState extends State<EditSubscriptionPage>
                       });
                     },
                   ),
-                );
-              },
+                  ),
+                 );
+               },
             ),
           ),
         ],
@@ -1745,8 +1748,9 @@ class _EditSubscriptionPageState extends State<EditSubscriptionPage>
           picked.day,
           timePicked.hour,
           timePicked.minute,
-        ),
-      );
+                    ),
+                  
+                );
     }
   }
 
@@ -1948,8 +1952,9 @@ class _EditSubscriptionPageState extends State<EditSubscriptionPage>
                 duration: 'monthly',
                 features: [],
                 isActive: true,
-              ),
-            );
+                  ),
+                  
+                 );
 
             // تحويل الميزات من List<String> إلى Map<String, dynamic>
             if (selectedType.features.isNotEmpty) {
@@ -2006,7 +2011,7 @@ class _EditSubscriptionPageState extends State<EditSubscriptionPage>
     final subscriptionBloc = context.read<SubscriptionBloc>();
 
     // استخدام النظام الجديد لإدارة عملية الحفظ
-    performBlocSaveOperation(
+    await performBlocSaveOperation(
       triggerSave: () {
         subscriptionBloc.add(UpdateSubscriptionEvent(updatedSubscription));
       },

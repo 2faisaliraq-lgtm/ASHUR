@@ -13,7 +13,6 @@ import '../../core/utils/retry_helper.dart';
 import '../../core/permissions/permissions_initializer.dart';
 import '../../core/services/formatting_service.dart';
 import '../../core/services/pdf/pdf_settings_service.dart';
-import '../../core/services/push_notification_service.dart';
 import '../../core/services/role_request_settings_service.dart';
 import '../../core/services/session_service.dart';
 import '../../core/services/settings_service.dart';
@@ -55,7 +54,6 @@ class AppInitializer {
         initInvoices(),
         initCustomers(),
         initSubscriptionDependencies(),
-        PushNotificationService.initialize(),
       ]);
 
       _initCompleter!.complete();
@@ -67,7 +65,8 @@ class AppInitializer {
   }
 
   /// التحقق من انتهاء التهيئة
-  static bool get isInitialized => _initCompleter != null && _initCompleter!.isCompleted;
+  static bool get isInitialized =>
+      _initCompleter != null && _initCompleter!.isCompleted;
 
   /// انتظار انتهاء التهيئة إن كانت جارية
   static Future<void> ensureInitialized() async {
@@ -106,8 +105,8 @@ class AppInitializer {
         OneSignalNotificationService.initialize(),
         NotificationForegroundService.initialize(),
       ]);
-    } on Exception catch (e) {
-      debugPrint('Background initialization failed: $e');
+    } on Exception catch (_) {
+      // تهيئة الخدمات الخلفية اختيارية ولا توقف تشغيل التطبيق.
     }
   }
 
@@ -122,7 +121,6 @@ class AppInitializer {
   static Future<void> _initFirebaseAppCheck() async {
     try {
       if (kDebugMode) {
-        debugPrint('Skipping Firebase App Check activation in debug mode');
         return;
       }
 
@@ -137,10 +135,10 @@ class AppInitializer {
       } else {
         await FirebaseAppCheck.instance.activate();
       }
-    } on FirebaseException catch (e) {
-      debugPrint('Firebase App Check activation failed: ${e.code} - ${e.message}');
-    } on Exception catch (e) {
-      debugPrint('Firebase App Check activation failed: $e');
+    } on FirebaseException catch (_) {
+      // سيستمر التطبيق حتى إذا تعذر تفعيل App Check.
+    } on Exception catch (_) {
+      // سيستمر التطبيق حتى إذا تعذر تفعيل App Check.
     }
   }
 

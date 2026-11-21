@@ -131,13 +131,13 @@ class DeleteRentalDialog {
               try {
                 final isSectionEnabled =
                     await SectionNotificationService.isSectionNotificationsEnabled(
-                  'rentals',
-                );
+                      'rentals',
+                    );
                 if (!isSectionEnabled) return;
                 final isTypeEnabled =
                     await SettingsService.isNotificationTypeEnabled(
-                  'rental_notify_deleted',
-                );
+                      'rental_notify_deleted',
+                    );
                 if (!isTypeEnabled) return;
                 await PushNotificationService.sendOrganizationNotification(
                   organizationEmail: rental.organizationEmail,
@@ -147,8 +147,8 @@ class DeleteRentalDialog {
                   actorEmail: deleteRentalActorEmail,
                   data: {'rentalId': rental.id},
                 );
-              } on Exception catch (e) {
-                debugPrint('Failed to send rental_deleted notification: $e');
+              } on Exception catch (_) {
+                // فشل الإشعار لا يمنع إتمام حذف عقد الإيجار.
               }
             }());
           }

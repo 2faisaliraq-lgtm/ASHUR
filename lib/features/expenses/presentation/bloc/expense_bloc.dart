@@ -98,26 +98,25 @@ class ExpenseBloc extends Bloc<ExpenseEvent, ExpenseState> {
   ) async {
     emit(ExpenseLoading());
     final result = await getExpenses(event.organizationEmail);
-    await result.fold(
-      (failure) async => emit(ExpenseError(failure.message)),
-      (expenses) async {
-        // ℹ️ ملاحظة أداء: تُحسب الإحصائيات من القائمة المُحمّلة
-        // مباشرة (بدون قراءة ثانية للمجموعة) — نفس نتيجة
-        // getExpenseStats لكن أسرع.
-        final stats = repository.computeExpenseStats(expenses);
+    await result.fold((failure) async => emit(ExpenseError(failure.message)), (
+      expenses,
+    ) async {
+      // ℹ️ ملاحظة أداء: تُحسب الإحصائيات من القائمة المُحمّلة
+      // مباشرة (بدون قراءة ثانية للمجموعة) — نفس نتيجة
+      // getExpenseStats لكن أسرع.
+      final stats = repository.computeExpenseStats(expenses);
 
-        emit(
-          ExpenseLoaded(
-            expenses: expenses,
-            filteredExpenses: expenses,
-            selectedFilter: 'all',
-            searchQuery: '',
-            stats: stats,
-            isGridView: false,
-          ),
-        );
-      },
-    );
+      emit(
+        ExpenseLoaded(
+          expenses: expenses,
+          filteredExpenses: expenses,
+          selectedFilter: 'all',
+          searchQuery: '',
+          stats: stats,
+          isGridView: false,
+        ),
+      );
+    });
   }
 
   // متغيرات للتحكم في pagination
@@ -271,8 +270,8 @@ class ExpenseBloc extends Bloc<ExpenseEvent, ExpenseState> {
                 actorEmail: expenseActorEmail,
                 data: {'expenseId': event.expense.id},
               );
-            } on Exception catch (e) {
-              debugPrint('Failed to send expense_created notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع حفظ المصروف.
             }
           }());
           // ⚠️ ملاحظة للمبرمجين المستقبليين: الإشعار يُرسل عبر unawaited ( Fire-and-forget )
@@ -349,8 +348,8 @@ class ExpenseBloc extends Bloc<ExpenseEvent, ExpenseState> {
                 actorEmail: updateExpenseActorEmail,
                 data: {'expenseId': event.expense.id},
               );
-            } on Exception catch (e) {
-              debugPrint('Failed to send expense_updated notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع تحديث المصروف.
             }
           }());
           // ⚠️ إشعار Fire-and-forget — انظر الملاحظة في _onAddExpense أعلاه.
@@ -418,60 +417,59 @@ class ExpenseBloc extends Bloc<ExpenseEvent, ExpenseState> {
     if (state is ExpenseLoaded) {
       emit(ExpenseLoading());
       final result = await deleteExpense(event.id, event.organizationEmail);
-      await result.fold(
-        (failure) async => emit(ExpenseError(failure.message)),
-        (_) async {
-          // إرسال إشعار تنظيمي بحذف المصروف
-          final deleteExpenseActorEmail =
-              FirebaseAuth.instance.currentUser?.email ?? '';
-          if (deleteExpenseActorEmail.isNotEmpty) {
-            unawaited(() async {
-              try {
-                final isSectionEnabled =
-                    await SectionNotificationService.isSectionNotificationsEnabled(
-                      'expenses',
-                    );
-                if (!isSectionEnabled) return;
-                final isTypeEnabled =
-                    await SettingsService.isNotificationTypeEnabled(
-                      'expenses_notify_deleted',
-                    );
-                if (!isTypeEnabled) return;
-                await PushNotificationService.sendOrganizationNotification(
-                  organizationEmail: event.organizationEmail,
-                  title: '🗑️ حذف مصروف',
-                  body: 'تم حذف مصروف من النظام',
-                  type: 'expense_deleted',
-                  actorEmail: deleteExpenseActorEmail,
-                  data: {'expenseId': event.id},
-                );
-              } on Exception catch (e) {
-                debugPrint('Failed to send expense_deleted notification: $e');
-              }
-            }());
-            // ⚠️ إشعار Fire-and-forget — انظر الملاحظة في _onAddExpense أعلاه.
-          }
+      await result.fold((failure) async => emit(ExpenseError(failure.message)), (
+        _,
+      ) async {
+        // إرسال إشعار تنظيمي بحذف المصروف
+        final deleteExpenseActorEmail =
+            FirebaseAuth.instance.currentUser?.email ?? '';
+        if (deleteExpenseActorEmail.isNotEmpty) {
+          unawaited(() async {
+            try {
+              final isSectionEnabled =
+                  await SectionNotificationService.isSectionNotificationsEnabled(
+                    'expenses',
+                  );
+              if (!isSectionEnabled) return;
+              final isTypeEnabled =
+                  await SettingsService.isNotificationTypeEnabled(
+                    'expenses_notify_deleted',
+                  );
+              if (!isTypeEnabled) return;
+              await PushNotificationService.sendOrganizationNotification(
+                organizationEmail: event.organizationEmail,
+                title: '🗑️ حذف مصروف',
+                body: 'تم حذف مصروف من النظام',
+                type: 'expense_deleted',
+                actorEmail: deleteExpenseActorEmail,
+                data: {'expenseId': event.id},
+              );
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع حذف المصروف.
+            }
+          }());
+          // ⚠️ إشعار Fire-and-forget — انظر الملاحظة في _onAddExpense أعلاه.
+        }
 
-          emit(const ExpenseOperationSuccess('تم حذف المصروف بنجاح'));
+        emit(const ExpenseOperationSuccess('تم حذف المصروف بنجاح'));
 
-          // تحديث الحالة محلياً بدلاً من إعادة تحميل كل المصاريف من الخادم
-          if (state is ExpenseLoaded) {
-            final currentState = state as ExpenseLoaded;
-            final updatedExpenses = <ExpenseEntity>[
-              for (final e in currentState.expenses)
-                if (e.id != event.id) e,
-            ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-            final stats = repository.computeExpenseStats(updatedExpenses);
-            emit(
-              currentState.copyWith(
-                expenses: updatedExpenses,
-                filteredExpenses: updatedExpenses,
-                stats: stats,
-              ),
-            );
-          }
-        },
-      );
+        // تحديث الحالة محلياً بدلاً من إعادة تحميل كل المصاريف من الخادم
+        if (state is ExpenseLoaded) {
+          final currentState = state as ExpenseLoaded;
+          final updatedExpenses = <ExpenseEntity>[
+            for (final e in currentState.expenses)
+              if (e.id != event.id) e,
+          ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          final stats = repository.computeExpenseStats(updatedExpenses);
+          emit(
+            currentState.copyWith(
+              expenses: updatedExpenses,
+              filteredExpenses: updatedExpenses,
+              stats: stats,
+            ),
+          );
+        }
+      });
     }
   }
 
@@ -726,9 +724,8 @@ class ExpenseBloc extends Bloc<ExpenseEvent, ExpenseState> {
         (result) {
           add(_ExpenseStatsStreamDataReceived(result));
         },
-        onError: (error) {
-          // تسجيل خطأ ستريم الإحصائيات لمراقبة المشكلات المحتملة
-          debugPrint('Expense stats stream error: $error');
+        onError: (_) {
+          // تجاهل خطأ stream الإحصائيات مع إبقاء الحالة الحالية.
         },
         onDone: () {
           // Stream completed

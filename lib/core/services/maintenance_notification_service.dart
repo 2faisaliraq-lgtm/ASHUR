@@ -136,17 +136,26 @@ class MaintenanceNotificationService {
       final title = item['title'] as String? ?? 'صيانة';
       final asset = item['assetName'] as String? ?? 'المعدة';
 
-      // معالجة الصيانة المتأخرة
+      // معالجة الصيانة المتأخرة - إدراج في قائمة الانتظار
       if (daysRemaining < 0) {
         if (settings['overdueEnabled'] as bool? ?? true) {
           final notificationId = '${itemId}_overdue_$dayKey';
           if (!shownNotifications.contains(notificationId)) {
-            await _sendOverdueMaintenanceNotification(
-              itemId,
-              title,
-              asset,
-              dueDate,
-            );
+            try {
+              await PushNotificationService.enqueueNotification(
+                title: '⚠️ صيانة متأخرة: $title',
+                body:
+                    'صيانة $title للـ $asset متأخرة عن موعدها المحدد (${_formatDate(dueDate)})!',
+                type: 'maintenance_alert_overdue',
+                scheduledAt: DateTime.now(),
+                data: {
+                  'maintenance_id': itemId,
+                  'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+              );
+            } on FirebaseException catch (_) {
+              continue;
+            }
             shownNotifications.add(notificationId);
             hasChanges = true;
           }
@@ -154,18 +163,27 @@ class MaintenanceNotificationService {
         continue;
       }
 
-      // معالجة الصيانة القادمة أو المستحقة اليوم
+      // معالجة الصيانة القادمة أو المستحقة اليوم - إدراج في قائمة الانتظار
       if ((settings['upcomingEnabled'] as bool? ?? true) &&
           (warningDaysList.contains(daysRemaining) || daysRemaining == 0)) {
         final notificationId = '${itemId}_due_${dayKey}_$daysRemaining';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendMaintenanceNotification(
-            itemId,
-            title,
-            asset,
-            daysRemaining,
-            dueDate,
-          );
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه صيانة: $title',
+              body: daysRemaining == 0
+                  ? '$title للـ $asset مستحقة اليوم!'
+                  : '$title للـ $asset ستستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})',
+              type: 'maintenance_alert_urgent',
+              scheduledAt: DateTime.now(),
+              data: {
+                'maintenance_id': itemId,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
@@ -180,48 +198,7 @@ class MaintenanceNotificationService {
     }
   }
 
-  /// ترسل إشعار عن صيانة قريبة من موعدها
-  static Future<void> _sendMaintenanceNotification(
-    String itemId,
-    String title,
-    String asset,
-    int daysRemaining,
-    DateTime dueDate,
-  ) async {
-    final notificationTitle = 'تنبيه صيانة: $title';
-    final message = daysRemaining == 0
-        ? '$title للـ $asset مستحقة اليوم!'
-        : '$title للـ $asset ستستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})';
-
-    await PushNotificationService.showLocalMaintenanceAlert(
-      title: notificationTitle,
-      message: message,
-      notificationId: _generateNotificationId(
-        itemId,
-        'upcoming_$daysRemaining',
-      ),
-    );
-  }
-
-  /// ترسل إشعار عن صيانة متأخرة
-  static Future<void> _sendOverdueMaintenanceNotification(
-    String itemId,
-    String title,
-    String asset,
-    DateTime dueDate,
-  ) async {
-    final notificationTitle = '⚠️ صيانة متأخرة: $title';
-    final message =
-        'صيانة $title للـ $asset متأخرة عن موعدها المحدد (${_formatDate(dueDate)})!';
-
-    await PushNotificationService.showLocalMaintenanceAlert(
-      title: notificationTitle,
-      message: message,
-      notificationId: _generateNotificationId(itemId, 'overdue'),
-    );
-  }
-
-  /// تنسيق التاريخ بصيغة سهلة القراءة
+  /// إرسال إشعار عند إنشاء سجل صيانة جديد
   static String _formatDate(DateTime date) {
     final monthNames = [
       'يناير',

@@ -27,7 +27,9 @@ class PermissionChecker {
 
   // Timer للـ polling (اختياري - للتحديث الدوري)
   Timer? _pollingTimer;
-  static const _pollingInterval = Duration(seconds: 30); // تحديث كل 30 ثانية لتقليل الاستعلامات غير الضرورية
+  static const _pollingInterval = Duration(
+    seconds: 30,
+  ); // تحديث كل 30 ثانية لتقليل الاستعلامات غير الضرورية
 
   // StreamSubscription للاستماع لتغييرات المستخدم المبدل
   StreamSubscription? _switchedUserSubscription;
@@ -333,6 +335,14 @@ class PermissionChecker {
     final permissions = await getUserPermissions();
     final result = permissionList.every(permissions.contains);
     return result;
+  }
+
+  Future<Map<String, bool>> hasPermissions(List<String> permissionList) async {
+    final permissions = await getUserPermissions();
+    return {
+      for (final permission in permissionList)
+        permission: permissions.contains(permission),
+    };
   }
 
   /// تحديث فوري للصلاحيات (يُستخدم عند تبديل المستخدم أو تغيير الصلاحيات)

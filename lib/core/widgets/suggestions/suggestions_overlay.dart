@@ -1,5 +1,5 @@
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../features/customers/domain/entities/customer_entity.dart';
 import '../../../features/inventory/domain/entities/product_entity.dart';
@@ -370,73 +370,76 @@ class _SuggestionsOverlayContent extends StatelessWidget {
               borderRadius: BorderRadius.circular(8.r),
             )
           : null,
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
-        minLeadingWidth: 20.w,
-        leading: Icon(
-          suggestion.icon,
-          size: 16.sp,
-          color: hasWarning ? Colors.red : suggestion.color,
-        ),
-        title: Text(
-          suggestion.value,
-          style: TextStyle(
-            fontSize: 12.sp,
-            color: hasWarning ? Colors.red : Colors.black87,
-            fontWeight: hasWarning ? FontWeight.bold : FontWeight.normal,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
+          minLeadingWidth: 20.w,
+          leading: Icon(
+            suggestion.icon,
+            size: 16.sp,
+            color: hasWarning ? Colors.red : suggestion.color,
           ),
-          overflow: TextOverflow.ellipsis,
+          title: Text(
+            suggestion.value,
+            style: TextStyle(
+              fontSize: 12.sp,
+              color: hasWarning ? Colors.red : Colors.black87,
+              fontWeight: hasWarning ? FontWeight.bold : FontWeight.normal,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // السعر على اليمين
+              if (priceText != null)
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    priceText,
+                    style: TextStyle(
+                      fontSize: 13.sp,
+                      color: priceColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              // الرف في المنتصف (إذا كان موجوداً)
+              if (shelfName != null && shelfName.isNotEmpty)
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    shelfName,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Color(0xFF0D47A1),
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              // الكمية على اليسار
+              if (quantityText != null)
+                Expanded(
+                  flex: 1,
+                  child: Text(
+                    quantityText,
+                    textAlign: TextAlign.end,
+                    style: TextStyle(
+                      fontSize: 13.sp,
+                      color: quantityColor,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+          ),
+          onTap: () => onSuggestionSelected(suggestion.value),
         ),
-        subtitle: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // السعر على اليمين
-            if (priceText != null)
-              Expanded(
-                flex: 1,
-                child: Text(
-                  priceText,
-                  style: TextStyle(
-                    fontSize: 13.sp,
-                    color: priceColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            // الرف في المنتصف (إذا كان موجوداً)
-            if (shelfName != null && shelfName.isNotEmpty)
-              Expanded(
-                flex: 1,
-                child: Text(
-                  shelfName,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF0D47A1),
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            // الكمية على اليسار
-            if (quantityText != null)
-              Expanded(
-                flex: 1,
-                child: Text(
-                  quantityText,
-                  textAlign: TextAlign.end,
-                  style: TextStyle(
-                    fontSize: 13.sp,
-                    color: quantityColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-        ),
-        onTap: () => onSuggestionSelected(suggestion.value),
       ),
     );
   }
@@ -489,67 +492,70 @@ class _SuggestionsOverlayContent extends StatelessWidget {
               borderRadius: BorderRadius.circular(8.r),
             )
           : null,
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
-        minLeadingWidth: 20.w,
-        leading: Icon(
-          suggestion.icon,
-          size: 16.sp,
-          color: hasWarning ? Colors.red : suggestion.color,
-        ),
-        title: Text(
-          suggestion.title ?? suggestion.value,
-          style: TextStyle(
-            fontSize: 12.sp,
-            color: hasWarning ? Colors.red : Colors.black87,
-            fontWeight: hasWarning ? FontWeight.bold : FontWeight.normal,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 4.h),
+          minLeadingWidth: 20.w,
+          leading: Icon(
+            suggestion.icon,
+            size: 16.sp,
+            color: hasWarning ? Colors.red : suggestion.color,
           ),
-          overflow: TextOverflow.ellipsis,
-        ),
-        subtitle: phoneText != null
-            ? Text(
-                phoneText,
-                style: TextStyle(
-                  fontSize: 10.sp,
-                  color: hasWarning ? Colors.red[700] : Colors.grey[600],
-                ),
-                overflow: TextOverflow.ellipsis,
-              )
-            : null,
-        trailing: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            if (balanceText != null)
-              Text(
-                balanceText,
-                style: TextStyle(
-                  fontSize: 11.sp,
-                  color: balanceColor,
-                  fontWeight: FontWeight.bold,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            if (statusText != null)
-              Container(
-                margin: EdgeInsets.only(top: 2.h),
-                padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius: BorderRadius.circular(8.r),
-                ),
-                child: Text(
-                  statusText,
+          title: Text(
+            suggestion.title ?? suggestion.value,
+            style: TextStyle(
+              fontSize: 12.sp,
+              color: hasWarning ? Colors.red : Colors.black87,
+              fontWeight: hasWarning ? FontWeight.bold : FontWeight.normal,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: phoneText != null
+              ? Text(
+                  phoneText,
                   style: TextStyle(
-                    fontSize: 9.sp,
-                    color: Colors.white,
+                    fontSize: 10.sp,
+                    color: hasWarning ? Colors.red[700] : Colors.grey[600],
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )
+              : null,
+          trailing: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (balanceText != null)
+                Text(
+                  balanceText,
+                  style: TextStyle(
+                    fontSize: 11.sp,
+                    color: balanceColor,
                     fontWeight: FontWeight.bold,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-          ],
+              if (statusText != null)
+                Container(
+                  margin: EdgeInsets.only(top: 2.h),
+                  padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 2.h),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(8.r),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      fontSize: 9.sp,
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          onTap: () => onSuggestionSelected(suggestion.value),
         ),
-        onTap: () => onSuggestionSelected(suggestion.value),
       ),
     );
   }

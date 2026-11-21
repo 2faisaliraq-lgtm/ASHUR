@@ -60,6 +60,10 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
   // هذه العمليات تتطلب موارد خارجية ولا يمكن وضعها داخل Firestore transaction.
   // الحل الأمثل لجعلها ذرية هو استخدام Cloud Functions أو queues.
 
+  // كاش مؤقت لبيانات التصدير لتجنب استدعاءات الشبكة المتكررة
+  static Uint8List? _cachedLogoBytes;
+  static final Map<String, double> _customerDebtCache = {};
+
   InvoiceBloc({
     required this.getInvoices,
     required this.getInvoicesPaginated,
@@ -152,34 +156,33 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
   ) async {
     emit(InvoiceLoading());
     final result = await getInvoices(event.organizationEmail);
-    await result.fold(
-      (failure) async => emit(InvoiceError(failure.message)),
-      (invoices) async {
-        // تحميل الإحصائيات (كل الفواتير)
-        final statsResult = await getInvoiceStats(
-          GetInvoiceStatsParams(organizationEmail: event.organizationEmail),
-        );
-        InvoiceStatsEntity? stats;
-        // 🔧 ملاحظة للمبرمجين: في حال فشل جلب الإحصائيات، تُكمل العملية
-        // وتعرض الفواتير بدون إحصائيات بدلاً من إيقاف toda الصفحة.
-        // يمكن تسجيل الخطأ هنا مستقبلاً باستخدام خدمة log.
-        statsResult.fold(
-          (failure) => stats = null,
-          (loadedStats) => stats = loadedStats,
-        );
+    await result.fold((failure) async => emit(InvoiceError(failure.message)), (
+      invoices,
+    ) async {
+      // تحميل الإحصائيات (كل الفواتير)
+      final statsResult = await getInvoiceStats(
+        GetInvoiceStatsParams(organizationEmail: event.organizationEmail),
+      );
+      InvoiceStatsEntity? stats;
+      // 🔧 ملاحظة للمبرمجين: في حال فشل جلب الإحصائيات، تُكمل العملية
+      // وتعرض الفواتير بدون إحصائيات بدلاً من إيقاف toda الصفحة.
+      // يمكن تسجيل الخطأ هنا مستقبلاً باستخدام خدمة log.
+      statsResult.fold(
+        (failure) => stats = null,
+        (loadedStats) => stats = loadedStats,
+      );
 
-        emit(
-          InvoiceLoaded(
-            invoices: invoices,
-            filteredInvoices: invoices,
-            selectedFilter: 'all',
-            searchQuery: '',
-            stats: stats,
-            isGridView: false,
-          ),
-        );
-      },
-    );
+      emit(
+        InvoiceLoaded(
+          invoices: invoices,
+          filteredInvoices: invoices,
+          selectedFilter: 'all',
+          searchQuery: '',
+          stats: stats,
+          isGridView: false,
+        ),
+      );
+    });
   }
 
   /// تحميل الفواتير المؤرشفة فقط لصفحة الأرشيف
@@ -189,10 +192,10 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
   ) async {
     emit(InvoiceLoading());
     final result = await getArchivedInvoices(event.organizationEmail);
-      await result.fold(
-        (failure) async {
-          emit(InvoiceError(failure.message));
-        },
+    await result.fold(
+      (failure) async {
+        emit(InvoiceError(failure.message));
+      },
       (invoices) {
         emit(
           InvoiceLoaded(
@@ -256,93 +259,70 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
             orgPhone = settings.organizationPhone;
             orgAddress = settings.organizationAddress;
 
-            // محاولة تحميل شعار المؤسسة من الأصول (مثل فاتورة التفاصيل)
-            try {
-              final logoData = await rootBundle.load(
-                'assets/images/lamassu2.png',
-              );
-              logoBytes = logoData.buffer.asUint8List();
-            } on Exception {
-              // تجاهل خطأ قراءة الشعار
+            // محاولة تحميل شعار المؤسسة من الكاش أو الأصول
+            if (_cachedLogoBytes != null) {
+              logoBytes = _cachedLogoBytes;
+            } else {
+              try {
+                final logoData = await rootBundle.load(
+                  'assets/images/lamassu2.png',
+                );
+                logoBytes = logoData.buffer.asUint8List();
+                _cachedLogoBytes = logoBytes;
+              } on Exception {
+                // تجاهل خطأ قراءة الشعار
+              }
             }
 
-            // جلب القالب المحدد
+            // جلب القالب ودين العميل بالتوازي (استدعاءان مستقلان)
             InvoiceTemplateEntity? template;
+            double? customerDebt;
+
+            Future<InvoiceTemplateEntity?> templateFuture;
+            Future<double?> debtFuture;
+
             if (event.templateId != null && event.templateId!.isNotEmpty) {
-              final templateResult = await repository.getTemplateById(
-                event.organizationEmail,
-                event.templateId!,
-              );
-              template = templateResult.fold((failure) => null, (t) => t);
+              templateFuture = repository
+                  .getTemplateById(event.organizationEmail, event.templateId!)
+                  .then((r) => r.fold((failure) => null, (t) => t));
+            } else {
+              templateFuture = repository
+                  .getTemplateByType(event.organizationEmail, 'sales')
+                  .then((r) => r.fold((failure) => null, (t) => t));
             }
 
-            // إذا لم يتم تحديد قالب، نستخدم القالب الافتراضي حسب النوع
-            if (template == null) {
-              final templateResult = await repository.getTemplateByType(
-                event.organizationEmail,
-                'sales',
-              );
-              template = templateResult.fold((failure) => null, (t) => t);
+            if (event.customerId != null && event.customerId!.isNotEmpty) {
+              final cachedDebt = _customerDebtCache[event.customerId];
+              if (cachedDebt != null) {
+                customerDebt = cachedDebt;
+                debtFuture = Future.value(customerDebt);
+              } else {
+                debtFuture = customerRepository
+                    .getCustomerById(event.customerId!)
+                    .then(
+                      (r) => r.fold(
+                        (failure) => null,
+                        (customer) => customer.totalDebt,
+                      ),
+                    )
+                    .then((debt) {
+                      if (debt != null) {
+                        _customerDebtCache[event.customerId!] = debt;
+                      }
+                      return debt;
+                    });
+              }
+            } else {
+              debtFuture = Future.value(null);
             }
 
-            // إذا لم يوجد قالب، نستخدم القالب الافتراضي مع عرض الشعار ومعلومات الشركة
-            template ??= InvoiceTemplateEntity(
-              id: 'template_default',
-              name: 'القالب الافتراضي',
-              type: 'general',
-              headerColor: '#1B365D',
-              accentColor: '#D4AF37',
-              showLogo: true,
-              logoPosition: 'right',
-              showCompanyInfo: true,
-              showCustomerInfo: true,
-              showItemsTable: true,
-              showNotes: true,
-              showSignature: false,
-              footerText: 'شكراً لتعاملكم معنا',
-              isDefault: true,
-              customFields: {
-                'pageMarginTopMM': 0.0,
-                'pageMarginBottomMM': 0.0,
-                'pageMarginLeftMM': 0.0,
-                'pageMarginRightMM': 0.0,
-                'titleFontSizeValue': 18.0,
-                'subtitleFontSizeValue': 14.0,
-                'headerFontSizeValue': 12.0,
-                'bodyFontSizeValue': 11.0,
-                'footerFontSizeValue': 8.0,
-                'tableCellPadding': 6.0,
-                'logoWidth': 120.0,
-                'logoHeight': 120.0,
-                'headerPadding': 20.0,
-                'headerBorderRadius': 0.0,
-                'companyNameFontSize': 24.0,
-                'companyInfoFontSize': 12.0,
-                'invoiceTitleFontSize': 20.0,
-                'invoiceInfoFontSize': 12.0,
-                'customerInfoPadding': 15.0,
-                'customerInfoBorderWidth': 2.0,
-                'customerInfoBorderRadius': 0.0,
-                'customerInfoTitleFontSize': 16.0,
-                'customerInfoTextFontSize': 12.0,
-                'tableBorderWidth': 1.0,
-                'tableHeaderFontSize': 12.0,
-                'tableRowFontSize': 10.0,
-                'alternateRowColors': true,
-                'alternateRowColor': '#F5F5F5',
-                'footerPadding': 10.0,
-                'footerBorderWidth': 2.0,
-                'footerFontSize': 10.0,
-                'showBorderAroundTable': true,
-                'useRoundCorners': false,
-                'useGradientHeader': false,
-                'showInvoiceNumberLarge': false,
-                'useCardStyleForSections': false,
-              },
-            );
+            final results = await Future.wait([templateFuture, debtFuture]);
+            template = results[0] as InvoiceTemplateEntity?;
+            customerDebt = results[1] as double?;
 
             // ضمان عرض الشعار عندما يكون متوفراً، حتى لو كان القالب المحدد لا يُظهره
-            final bool showLogo = template.showLogo && logoBytes != null;
+            final bool showLogo =
+                (template?.showLogo ?? false) && logoBytes != null;
 
             final pdfService = PdfService();
             final pdfFile = await pdfService.generateInvoicesHistoryPdf(
@@ -351,8 +331,9 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
               organizationPhone: orgPhone,
               organizationAddress: orgAddress,
               logoBytes: logoBytes,
-              template: template.copyWith(showLogo: showLogo),
+              template: template?.copyWith(showLogo: showLogo),
               customerName: event.customerName,
+              customerDebt: customerDebt,
             );
 
             emit(InvoiceHistoryExported(pdfFile));
@@ -583,9 +564,8 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
                   ),
                 );
               }
-            } on Exception catch (e) {
-              // تجاهل الأخطاء في التحقق من حد الائتمان مع تسجيلها للتصحيح
-              debugPrint('Credit limit check error: $e');
+            } on Exception catch (_) {
+              // تجاهل الأخطاء في التحقق من حد الائتمان.
             }
           });
         } on Exception catch (_) {
@@ -739,8 +719,8 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
                   }
                 }
               }
-            } on Exception catch (e) {
-              debugPrint('Failed to send invoice_created notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع حفظ الفاتورة.
             }
           }
           // توليد وإرسال PDF تلقائياً للفاتورة
@@ -941,10 +921,8 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
                   );
                 }
               }
-            } on Exception catch (e) {
-              debugPrint(
-                'Failed to send invoice_updated/invoice_paid notification: $e',
-              );
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع تحديث الفاتورة.
             }
           }
 
@@ -1053,8 +1031,8 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
                   );
                 }
               }
-            } on Exception catch (e) {
-              debugPrint('Failed to send invoice_deleted notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع حذف الفاتورة.
             }
           }
 
@@ -1367,8 +1345,8 @@ class InvoiceBloc extends Bloc<InvoiceEvent, InvoiceState> {
           // إنشاء event جديد بدلاً من emit مباشر
           add(_InvoiceStatsStreamDataReceived(result));
         },
-        onError: (error) {
-          debugPrint('Failed to load invoice stats stream: $error');
+        onError: (_) {
+          // يُتجاهل خطأ stream الإحصائيات وتظل البيانات الحالية معروضة.
         },
         onDone: () {
           // Stream completed

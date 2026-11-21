@@ -79,21 +79,6 @@ class SubscriptionNotificationService {
     }
   }
 
-  static Future<void> _rememberScheduledNotification(
-    String subscriptionId,
-    int notificationId,
-  ) async {
-    final key = await _scheduledIdsKey(subscriptionId);
-    final ids = List<String>.from(
-      SettingsService.getStringList(key) ?? const [],
-    );
-    final id = notificationId.toString();
-    if (!ids.contains(id)) {
-      ids.add(id);
-      await SettingsService.setStringList(key, ids);
-    }
-  }
-
   static Future<String> _shownNotificationsStorageKey() async {
     final deviceId = await SettingsService.getDeviceId();
     final switchedUser = await SessionService.getSwitchedUser();
@@ -337,7 +322,7 @@ class SubscriptionNotificationService {
       final daysRemaining = endDate.difference(today).inDays;
       final isExpired = subscription.status == 'expired' || daysRemaining < 0;
 
-      if (isExpired) {
+        if (isExpired) {
         await _cancelScheduledNotifications(subscription.id);
         await _cancelLegacyShownRecords(subscription.id);
         if (!(settings['expiredEnabled'] as bool? ?? false)) continue;
@@ -352,27 +337,22 @@ class SubscriptionNotificationService {
           continue;
         }
 
-        final expiryNotificationId = _generateNotificationId(
-          subscription.id,
-          expiryPrefix,
-        );
         try {
-          await PushNotificationService.showLocalSubscriptionAlert(
+          await PushNotificationService.enqueueNotification(
             title: 'انتهى الاشتراك',
-            message:
+            body:
                 'انتهى اشتراك ${subscription.customerName ?? 'المشترك'} بتاريخ ${_formatDate(subscription.endDate)}. يرجى مراجعة التجديد.',
-            notificationId: expiryNotificationId,
-            payload: 'subscriptions',
-            respectSettings: false,
+            type: 'subscription_alert_expired',
+            scheduledAt: DateTime.now(),
+            data: {
+              'subscription_id': subscription.id,
+              'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+            },
           );
         } on FirebaseException catch (error) {
           if (error.code != 'not-found') rethrow;
           continue;
         }
-        await _rememberScheduledNotification(
-          subscription.id,
-          expiryNotificationId,
-        );
         shownNotifications.add(expiryKey);
         shownNotifications.add(legacyExpiryKey);
         alreadyShown.add(expiryKey);
@@ -406,22 +386,22 @@ class SubscriptionNotificationService {
           settings['localMinute'] as int? ?? 0,
         );
         if (!warningDate.isAfter(tz.TZDateTime.now(tz.local))) continue;
-        final notificationId = _generateNotificationId(
-          subscription.id,
-          reminderPrefix,
-        );
-        final wasScheduled =
-            await PushNotificationService.scheduleLocalSubscriptionAlert(
-          title: 'اشتراك يقترب من الانتهاء',
-          message:
-              'اشتراك ${subscription.customerName ?? 'المشترك'} ينتهي خلال $daysBefore يوم. تاريخ الانتهاء: ${_formatDate(subscription.endDate)}.',
-          scheduledDate: warningDate,
-          notificationId: notificationId,
-          payload: 'subscriptions',
-          respectSettings: false,
-        );
-        if (!wasScheduled) continue;
-        await _rememberScheduledNotification(subscription.id, notificationId);
+        try {
+          await PushNotificationService.enqueueNotification(
+            title: 'اشتراك يقترب من الانتهاء',
+            body:
+                'اشتراك ${subscription.customerName ?? 'المشترك'} ينتهي خلال $daysBefore يوم. تاريخ الانتهاء: ${_formatDate(subscription.endDate)}.',
+            type: 'subscription_alert_expiring_soon',
+            scheduledAt: warningDate,
+            data: {
+              'subscription_id': subscription.id,
+              'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+            },
+          );
+        } on FirebaseException catch (error) {
+          if (error.code != 'not-found') rethrow;
+          continue;
+        }
         shownNotifications.add(reminderKey);
         alreadyShown.add(reminderKey);
         hasChanges = true;
@@ -438,22 +418,21 @@ class SubscriptionNotificationService {
             todayPrefix,
           );
           try {
-            await PushNotificationService.showLocalSubscriptionAlert(
+            await PushNotificationService.enqueueNotification(
               title: 'تنبيه انتهاء اشتراك',
-              message:
+              body:
                   'اشتراك ${subscription.customerName ?? 'المشترك'} ينتهي اليوم. راجع التجديد قبل ${_formatDateTime(subscription.endDate)}.',
-              notificationId: todayNotificationId,
-              payload: 'subscriptions',
-              respectSettings: false,
+              type: 'subscription_alert_expiring_soon',
+              scheduledAt: DateTime.now(),
+              data: {
+                'subscription_id': subscription.id,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
             );
           } on FirebaseException catch (error) {
             if (error.code != 'not-found') rethrow;
             continue;
           }
-          await _rememberScheduledNotification(
-            subscription.id,
-            todayNotificationId,
-          );
           shownNotifications.add(todayKey);
           alreadyShown.add(todayKey);
           hasChanges = true;

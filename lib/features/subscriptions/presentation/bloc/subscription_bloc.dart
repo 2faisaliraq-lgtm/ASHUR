@@ -469,8 +469,6 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
             lastDocument: _lastDocument,
           ),
         );
-
-
       },
     );
   }
@@ -800,9 +798,7 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
                   data: {'subscriptionId': event.subscription.id},
                 );
               } on Exception catch (_) {
-                debugPrint(
-                  'Failed to send subscription_created notification: حدث خطأ',
-                );
+                // فشل الإشعار لا يمنع إنشاء الاشتراك.
               }
             }());
           }
@@ -1053,9 +1049,7 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
                 data: {'subscriptionId': event.subscriptionId},
               );
             } on Exception catch (_) {
-              debugPrint(
-                'Failed to send subscription_deleted notification: حدث خطأ',
-              );
+              // فشل الإشعار لا يمنع حذف الاشتراك.
             }
           }());
         }
@@ -1175,9 +1169,7 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
                 data: {'subscriptionId': subscription.id},
               );
             } on Exception catch (_) {
-              debugPrint(
-                'Failed to send subscription_renewed notification: حدث خطأ',
-              );
+              // فشل الإشعار لا يمنع تجديد الاشتراك.
             }
           }());
         }
@@ -1245,9 +1237,7 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
                   data: {'subscriptionId': event.subscription.id},
                 );
               } on Exception catch (_) {
-                debugPrint(
-                  'Failed to send subscription_updated notification: حدث خطأ',
-                );
+                // فشل الإشعار لا يمنع تحديث الاشتراك.
               }
             }());
           }
@@ -1694,7 +1684,7 @@ class SubscriptionBloc extends Bloc<SubscriptionEvent, SubscriptionState> {
             },
           );
         } on Exception catch (_) {
-          debugPrint('Failed to send invoice_created notification: حدث خطأ');
+          // فشل الإشعار لا يمنع إنشاء الفاتورة.
         }
       }());
     }

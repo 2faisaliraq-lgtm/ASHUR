@@ -609,8 +609,10 @@ class _CategoriesListPageState extends State<CategoriesListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(8),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(8),
         onTap: () {
           Navigator.of(
             context,
@@ -727,9 +729,10 @@ class _CategoriesListPageState extends State<CategoriesListPage> {
                 ),
               ),
           ],
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   void _confirmDelete(CategoryEntity category) {

@@ -691,8 +691,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage>
         }
       }
     } on Exception catch (_) {
-      // في حالة الخطأ، نعود للقيمة الافتراضية مع تسجيل للتشخيص
-      debugPrint('Failed to load user name for $userId');
+      // في حالة الخطأ، نعود للقيمة الافتراضية.
     }
 
     return userId;
@@ -1895,9 +1894,7 @@ class _CustomerDetailsPageState extends State<CustomerDetailsPage>
       }
 
       return success;
-    } on Exception catch (e) {
-      // في حالة الفشل، نعيد تحميل الفواتير ونُسجِّل الخطأ للتشخيص
-      debugPrint('Failed to archive customer invoices: $e');
+    } on Exception catch (_) {
       final user = FirebaseAuth.instance.currentUser;
       final userEmail = user?.email;
       if (userEmail != null) {

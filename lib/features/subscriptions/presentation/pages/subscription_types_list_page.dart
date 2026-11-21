@@ -577,9 +577,11 @@ class _SubscriptionTypesListPageState extends State<SubscriptionTypesListPage>
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
         onTap: () {
           Navigator.of(
             context,
@@ -741,9 +743,10 @@ class _SubscriptionTypesListPageState extends State<SubscriptionTypesListPage>
               ),
             ],
           ),
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   Color _getActivationColor(SubscriptionTypeEntity type) {

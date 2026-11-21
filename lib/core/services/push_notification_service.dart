@@ -1,6 +1,8 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../email/email_normalization_service.dart';
 import 'notification_delivery_service.dart';
 import 'notification_queue_service.dart';
 import 'one_signal_notification_service.dart';
@@ -54,11 +56,17 @@ class PushNotificationService {
     return scheduledDate == null || messageId != null;
   }
 
-  static Future<bool> _isOneSignalAlertEnabled(String section, {String? uid}) async {
+  static Future<bool> _isOneSignalAlertEnabled(
+    String section, {
+    String? uid,
+  }) async {
     // ✅ فحص إعدادات الإشعارات الشخصية للمستخدم الحالي أولاً
     if (uid != null) {
-      final userSettings = await SettingsService.getUserNotificationSettings(uid);
-      final notificationsEnabled = userSettings['enableNotifications'] as bool? ?? true;
+      final userSettings = await SettingsService.getUserNotificationSettings(
+        uid,
+      );
+      final notificationsEnabled =
+          userSettings['enableNotifications'] as bool? ?? true;
       if (!notificationsEnabled) return false;
 
       final typeKey = switch (section) {
@@ -123,11 +131,17 @@ class PushNotificationService {
       (settings[masterKey] as bool? ?? false) &&
       (settings[pushKey] as bool? ?? false);
 
-  static Future<bool> _isOrganizationPushEnabled(String type, {String? uid}) async {
+  static Future<bool> _isOrganizationPushEnabled(
+    String type, {
+    String? uid,
+  }) async {
     // ✅ فحص إعدادات الإشعارات الشخصية للمستخدم الحالي أولاً
     if (uid != null) {
-      final userSettings = await SettingsService.getUserNotificationSettings(uid);
-      final notificationsEnabled = userSettings['enableNotifications'] as bool? ?? true;
+      final userSettings = await SettingsService.getUserNotificationSettings(
+        uid,
+      );
+      final notificationsEnabled =
+          userSettings['enableNotifications'] as bool? ?? true;
       if (!notificationsEnabled) return false;
 
       final typeKey = switch (type) {
@@ -152,7 +166,9 @@ class PushNotificationService {
         'rental_updated' ||
         'rental_deleted' ||
         'rental_returned' => 'rental_notify_new',
-        'expense_created' || 'expense_updated' || 'expense_deleted' => 'expenses_notify_new',
+        'expense_created' ||
+        'expense_updated' ||
+        'expense_deleted' => 'expenses_notify_new',
         'subscription_created' ||
         'subscription_updated' ||
         'subscription_deleted' ||
@@ -294,7 +310,8 @@ class PushNotificationService {
     bool respectSettings = true,
     String? uid,
   }) async {
-    if (respectSettings && !await _isOneSignalAlertEnabled('subscriptions', uid: uid)) {
+    if (respectSettings &&
+        !await _isOneSignalAlertEnabled('subscriptions', uid: uid)) {
       return;
     }
     final user = FirebaseAuth.instance.currentUser;
@@ -351,7 +368,8 @@ class PushNotificationService {
     bool respectSettings = true,
     String? uid,
   }) async {
-    if (respectSettings && !await _isOneSignalAlertEnabled('subscriptions', uid: uid)) {
+    if (respectSettings &&
+        !await _isOneSignalAlertEnabled('subscriptions', uid: uid)) {
       return false;
     }
     final user = FirebaseAuth.instance.currentUser;
@@ -483,9 +501,11 @@ class PushNotificationService {
     for (final entry in matching) {
       final messageId = entry.substring(notificationId.toString().length + 1);
       try {
-        await OneSignalNotificationService.cancelScheduledNotification(messageId);
-      } on Exception catch (error) {
-        debugPrint('Failed to cancel scheduled OneSignal notification: $error');
+        await OneSignalNotificationService.cancelScheduledNotification(
+          messageId,
+        );
+      } on Exception catch (_) {
+        // إلغاء الإشعار المجدول لا يوقف تحديث القائمة.
       }
       entries.remove(entry);
     }
@@ -493,6 +513,36 @@ class PushNotificationService {
   }
 
   static Future<List<int>> pendingLocalNotificationIds() async => const <int>[];
+
+  static Future<void> enqueueNotification({
+    required String title,
+    required String body,
+    required String type,
+    required DateTime scheduledAt,
+    Map<String, String>? data,
+    String? uid,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.email == null) return;
+    final emailService = EmailNormalizationService();
+    final normalizedEmail = emailService.normalize(user.email!);
+
+    await FirebaseFirestore.instance
+        .collection(normalizedEmail)
+        .doc('notifications')
+        .collection('queue')
+        .add({
+          'title': title,
+          'body': body,
+          'type': type,
+          'scheduledAt': scheduledAt,
+          'organizationEmail': normalizedEmail,
+          'data': data ?? {},
+          'createdAt': DateTime.now().toUtc(),
+          'status': 'pending',
+          if (uid != null) ...{'uid': uid},
+        });
+  }
 
   static Future<String> _getCurrentDeviceId() async {
     return SettingsService.getDeviceId();

@@ -642,11 +642,13 @@ class _CreateRentalPageState extends State<CreateRentalPage>
                               )
                             : null,
                       ),
-                      child: ListTile(
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16.w,
-                          vertical: 8.h,
-                        ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16.w,
+                            vertical: 8.h,
+                          ),
                         leading: Icon(
                           _getUnitTypeIcon(unit.itemType),
                           color: AssyrianTheme.primaryGold,
@@ -701,6 +703,7 @@ class _CreateRentalPageState extends State<CreateRentalPage>
                             _showUnitSuggestions = false;
                           });
                         },
+                        ),
                       ),
                     );
                   },

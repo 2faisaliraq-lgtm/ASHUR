@@ -135,17 +135,26 @@ class RentalNotificationService {
       final tenantName = rental['tenantName'] as String? ?? 'المستأجر';
       final amount = rental['amount'] as num? ?? 0;
 
-      // الإيجارات المتأخرة
+      // الإيجارات المتأخرة - إدراج في قائمة الانتظار
       if (daysRemaining < 0) {
         if (settings['overdueEnabled'] as bool? ?? true) {
           final notificationId = '${rentalId}_overdue_$dayKey';
           if (!shownNotifications.contains(notificationId)) {
-            await _sendOverdueRentalNotification(
-              rentalId,
-              tenantName,
-              amount,
-              dueDate,
-            );
+            try {
+              await PushNotificationService.enqueueNotification(
+                title: '⚠️ إيجار متأخر السداد',
+                body:
+                    'إيجار $tenantName بقيمة $amount د.ع متأخر عن موعد استحقاقه (${_formatDate(dueDate)})!',
+                type: 'rental_alert_expired',
+                scheduledAt: DateTime.now(),
+                data: {
+                  'rental_id': rentalId,
+                  'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+              );
+            } on FirebaseException catch (_) {
+              continue;
+            }
             shownNotifications.add(notificationId);
             hasChanges = true;
           }
@@ -153,18 +162,27 @@ class RentalNotificationService {
         continue;
       }
 
-      // الإيجارات القادمة أو المستحقة اليوم
+      // الإيجارات القادمة أو المستحقة اليوم - إدراج في قائمة الانتظار
       if ((settings['upcomingEnabled'] as bool? ?? true) &&
           (warningDaysList.contains(daysRemaining) || daysRemaining == 0)) {
         final notificationId = '${rentalId}_due_${dayKey}_$daysRemaining';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendRentalNotification(
-            rentalId,
-            tenantName,
-            amount,
-            daysRemaining,
-            dueDate,
-          );
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: إيجار مستحق',
+              body: daysRemaining == 0
+                  ? 'إيجار $tenantName بقيمة $amount د.ع مستحق اليوم!'
+                  : 'إيجار $tenantName بقيمة $amount د.ع سيستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})',
+              type: 'rental_alert_expiring_soon',
+              scheduledAt: DateTime.now(),
+              data: {
+                'rental_id': rentalId,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
@@ -179,48 +197,7 @@ class RentalNotificationService {
     }
   }
 
-  /// ترسل إشعار عن إيجار قريب من الاستحقاق
-  static Future<void> _sendRentalNotification(
-    String rentalId,
-    String tenantName,
-    num amount,
-    int daysRemaining,
-    DateTime dueDate,
-  ) async {
-    final title = 'تنبيه: إيجار مستحق';
-    final message = daysRemaining == 0
-        ? 'إيجار $tenantName بقيمة $amount د.ع مستحق اليوم!'
-        : 'إيجار $tenantName بقيمة $amount د.ع سيستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})';
-
-    await PushNotificationService.showLocalRentalAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(
-        rentalId,
-        'upcoming_$daysRemaining',
-      ),
-    );
-  }
-
-  /// ترسل إشعار عن إيجار متأخر
-  static Future<void> _sendOverdueRentalNotification(
-    String rentalId,
-    String tenantName,
-    num amount,
-    DateTime dueDate,
-  ) async {
-    final title = '⚠️ إيجار متأخر السداد';
-    final message =
-        'إيجار $tenantName بقيمة $amount د.ع متأخر عن موعد استحقاقه (${_formatDate(dueDate)})!';
-
-    await PushNotificationService.showLocalRentalAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(rentalId, 'overdue'),
-    );
-  }
-
-  /// تنسيق التاريخ بصيغة سهلة القراءة
+  /// إرسال إشعار عند إنشاء عقد إيجار جديد
   static String _formatDate(DateTime date) {
     final monthNames = [
       'يناير',

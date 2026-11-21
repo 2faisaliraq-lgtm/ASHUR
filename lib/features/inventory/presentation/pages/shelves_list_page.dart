@@ -614,8 +614,10 @@ class _ShelvesListPageState extends State<ShelvesListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(8),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(8),
         onTap: () => _showShelfDetails(shelf),
         leading: CircleAvatar(
           backgroundColor: AssyrianTheme.primaryGold.withValues(alpha: 0.1),
@@ -714,9 +716,10 @@ class _ShelvesListPageState extends State<ShelvesListPage> {
               ),
             ),
           ],
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   void _showShelfDetails(ShelfEntity shelf) {

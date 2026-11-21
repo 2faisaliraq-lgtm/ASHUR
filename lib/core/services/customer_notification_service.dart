@@ -14,8 +14,11 @@ class CustomerNotificationService {
 
       // ✅ فحص إعدادات الإشعارات الشخصية للمستخدم الحالي
       if (uid != null) {
-        final userSettings = await SettingsService.getUserNotificationSettings(uid);
-        final notificationsEnabled = userSettings['enableNotifications'] as bool? ?? true;
+        final userSettings = await SettingsService.getUserNotificationSettings(
+          uid,
+        );
+        final notificationsEnabled =
+            userSettings['enableNotifications'] as bool? ?? true;
         if (!notificationsEnabled) {
           return {
             'enabled': false,
@@ -41,19 +44,12 @@ class CustomerNotificationService {
 
       return {
         'enabled': settings['enableCustomerNotifications'] ?? false,
-        'overdueCreditEnabled':
-            settings['customer_alert_high_debt'] ?? false,
-        'creditLimitEnabled':
-            settings['customer_alert_credit_limit'] ?? false,
-        'newCustomerEnabled':
-            settings['customer_notify_new'] ?? false,
+        'overdueCreditEnabled': settings['customer_alert_high_debt'] ?? false,
+        'creditLimitEnabled': settings['customer_alert_credit_limit'] ?? false,
+        'newCustomerEnabled': settings['customer_notify_new'] ?? false,
         'localEnabled': settings['customer_alert_local'] ?? false,
       };
-    } on Exception catch (e) {
-      // ملاحظة للمبرمجين المستقبليين: عند فشل قراءة الإعدادات لا تُرجع قيمًا افتراضية بصمت،
-      // لأن ذلك يخفي مشاكل إعدادات المسؤول ويوقف جميع التنبيهات دون تنبيه.
-      // يُفضل تسجيل الخطأ هنا عبر LoggerService عند توفره.
-      debugPrint('CustomerNotificationService: فشل في قراءة الإعدادات: $e');
+    } on Exception catch (_) {
       return {
         'enabled': false,
         'overdueCreditEnabled': false,
@@ -104,25 +100,55 @@ class CustomerNotificationService {
     var hasChanges = false;
 
     for (final customer in customers) {
-      // التحقق من العملاء ذوي الديون المتأخرة
+      // التحقق من العملاء ذوي الديون المتأخرة - إدراج في قائمة الانتظار
       if ((settings['overdueCreditEnabled'] as bool? ?? true) &&
           customer.totalDebt > 0) {
         final notificationId = '${customer.id}_overdue_$dayKey';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendOverdueCreditNotification(customer);
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: ديون مستحقة',
+              body:
+                  '${customer.name} عليه ديون قدرها ${customer.totalDebt.toStringAsFixed(2)} د.ع',
+              type: 'customer_alert_high_debt',
+              scheduledAt: DateTime.now(),
+              data: {
+                'customer_id': customer.id,
+                'organization_email':
+                    FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
       }
 
-      // التحقق من العملاء القريبين من حد الائتمان
+      // التحقق من العملاء القريبين من حد الائتمان - إدراج في قائمة الانتظار
       if ((settings['creditLimitEnabled'] as bool? ?? true) &&
           customer.creditLimit != null &&
           customer.totalDebt > 0 &&
           customer.totalDebt > (customer.creditLimit! * 0.8)) {
         final notificationId = '${customer.id}_credit_$dayKey';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendCreditLimitNotification(customer);
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: تجاوز حد الائتمان',
+              body:
+                  '${customer.name} تجاوز حد الائتمان (بمقدار: ${(customer.totalDebt - customer.creditLimit!).toStringAsFixed(2)} د.ع)',
+              type: 'customer_alert_credit_limit',
+              scheduledAt: DateTime.now(),
+              data: {
+                'customer_id': customer.id,
+                'organization_email':
+                    FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
@@ -134,7 +160,8 @@ class CustomerNotificationService {
       // مع الإشعارات الجديدة لتجنب فقدان إشعارات أضافها طلب متوازٍ.
       // بدون هذا، يمكن لطلبين متوازيين قراءة نفس القائمة، وإضافة إشعارات مختلفة،
       // ثم آخر كتابة تربح وتخسر إشعارات الطلب الأول.
-      final currentShown = SettingsService.getStringList(_shownNotificationsKey) ?? [];
+      final currentShown =
+          SettingsService.getStringList(_shownNotificationsKey) ?? [];
       final merged = <String>{};
       merged.addAll(currentShown);
       merged.addAll(shownNotifications);
@@ -144,40 +171,6 @@ class CustomerNotificationService {
       }
       await SettingsService.setStringList(_shownNotificationsKey, trimmed);
     }
-  }
-
-  /// ترسل إشعار عن عميل له ديون متأخرة
-  static Future<void> _sendOverdueCreditNotification(
-    CustomerEntity customer,
-  ) async {
-    final title = 'تنبيه: ديون مستحقة';
-    final message =
-        '${customer.name} عليه ديون قدرها ${customer.totalDebt.toStringAsFixed(2)} د.ع';
-
-    await PushNotificationService.showLocalCustomerAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(customer.id, 'debt'),
-    );
-  }
-
-  /// ترسل إشعار عن عميل قريب من حد الائتمان
-  static Future<void> _sendCreditLimitNotification(
-    CustomerEntity customer,
-  ) async {
-    final title = 'تنبيه: اقتراب من حد الائتمان';
-    final remaining = customer.creditLimit == null
-        ? 0.0
-        : customer.creditLimit! - customer.totalDebt;
-    final message = remaining < 0
-        ? '${customer.name} تجاوز حد الائتمان (بمقدار: ${remaining.abs().toStringAsFixed(2)} د.ع)'
-        : '${customer.name} قريب من حد الائتمان (متبقي: ${remaining.toStringAsFixed(2)} د.ع)';
-
-    await PushNotificationService.showLocalCustomerAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(customer.id, 'limit'),
-    );
   }
 
   /// إرسال إشعار عند إنشاء عميل جديد
@@ -191,8 +184,7 @@ class CustomerNotificationService {
 
     await PushNotificationService.showLocalCustomerAlert(
       title: '👤 تسجيل عميل جديد',
-      message:
-          'تمت إضافة العميل "${customer.name}" بنجاح إلى سجل العملاء',
+      message: 'تمت إضافة العميل "${customer.name}" بنجاح إلى سجل العملاء',
       notificationId: _generateNotificationId(customer.id, 'new_cust'),
     );
   }

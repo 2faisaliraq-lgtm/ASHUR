@@ -87,7 +87,7 @@ class NotificationForegroundService with WidgetsBindingObserver {
     try {
       await check(orgEmail);
       return true;
-    } on Object catch (error, stackTrace) {
+    } on Object catch (error) {
       final errorText = error.toString();
       if (errorText.contains(_notificationCallablesUnavailableMessage) ||
           errorText.contains('firebase_functions/not-found') ||
@@ -95,13 +95,8 @@ class NotificationForegroundService with WidgetsBindingObserver {
         // Missing push callables are a deployment issue, not a failed local
         // notification scan. Cool down to avoid repeating the same scan/logs.
         _lastCheck = DateTime.now();
-        debugPrint(
-          'Skipping notification checks because required Firebase Functions are unavailable.',
-        );
         return true;
       }
-      debugPrint('Notification check failed for $orgEmail: $error');
-      debugPrintStack(stackTrace: stackTrace);
       return false;
     }
   }

@@ -25,7 +25,7 @@ service cloud.firestore {
     // حذف +tag، وحذف النقاط لجيميل/جوجل فقط).
     function normalizeEmail(email) {
       let lower = email.lower();
-      let localPart = lower.split('@')[0].split('+')[0];
+      let localPart = lower.split('@')[0].split('\\+')[0];
       let domain = lower.split('@')[1];
       let isGmail = domain == 'gmail.com' || domain == 'googlemail.com';
       let normalizedLocal = isGmail ? localPart.replace('.', '') : localPart;

@@ -640,9 +640,11 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
         onTap: () {
           Navigator.pushNamed(
             context,
@@ -782,9 +784,10 @@ class _ExpensesListPageState extends State<ExpensesListPage> {
               ),
             ],
           ),
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   Color _getStatusColor(String status) {

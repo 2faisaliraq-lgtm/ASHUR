@@ -173,9 +173,7 @@ class OneSignalNotificationService {
                   user: user,
                   playerId: playerId,
                 ),
-              ).catchError((Object error) {
-                debugPrint('Failed to register changed OneSignal ID: $error');
-              }),
+              ).catchError((Object _) {}),
             );
           }
         });
@@ -189,20 +187,15 @@ class OneSignalNotificationService {
           unawaited(() async {
             try {
               await _registerWithRetry(() => registerCurrentUserPlayerId());
-            } on Exception catch (e) {
-              if (!e.toString().contains('session_time')) {
-                debugPrint(
-                  'Failed to register player ID after auth change: $e',
-                );
-              }
+            } on Exception catch (_) {
+              // إعادة التسجيل تحاول مجدداً عند تغير حالة المصادقة.
             }
           }());
         }
       });
     } on Exception catch (e) {
       final message = e.toString();
-      if (kDebugMode && message.contains('session_time')) {
-        debugPrint('OneSignal session_time warning suppressed in debug mode');
+      if (message.contains('session_time')) {
         _isInitialized = false;
         completer.complete();
         _initCompleter = null;
@@ -226,7 +219,6 @@ class OneSignalNotificationService {
     bool ignoreUserSettings = false,
   }) async {
     if (_restApiKey.isEmpty) {
-      debugPrint('إرسال OneSignal من التطبيق متوقف لأسباب أمنية؛ أرسل الطلب من الخادم.');
       return;
     }
 
@@ -248,8 +240,11 @@ class OneSignalNotificationService {
       // ⚠️ فحص إعدادات الإشعارات الشخصية للمستخدم قبل إدراجه في قائمة الإرسال
       // (تُتخطى هذه الفحوصات إذا كان ignoreUserSettings مفعلاً للإشعارات التجريبية)
       if (!ignoreUserSettings) {
-        final userSettings = await SettingsService.getUserNotificationSettings(uid);
-        final notificationsEnabled = userSettings['enableNotifications'] as bool? ?? true;
+        final userSettings = await SettingsService.getUserNotificationSettings(
+          uid,
+        );
+        final notificationsEnabled =
+            userSettings['enableNotifications'] as bool? ?? true;
         if (!notificationsEnabled) continue;
 
         // ✅ فحص نوع الإشعار المحدد للمستخدم
@@ -280,7 +275,8 @@ class OneSignalNotificationService {
       if (!ignoreUserSettings) {
         final currentUid = FirebaseAuth.instance.currentUser?.uid;
         if (currentUid != null) {
-          final currentSettings = await SettingsService.getUserNotificationSettings(currentUid);
+          final currentSettings =
+              await SettingsService.getUserNotificationSettings(currentUid);
           final currentNotificationsEnabled =
               currentSettings['enableNotifications'] as bool? ?? true;
           final currentTypeKey = _mapTypeToNotificationKey(type);
@@ -296,7 +292,6 @@ class OneSignalNotificationService {
     }
 
     if (playerIds.isEmpty) {
-      debugPrint('لا توجد Player IDs مفعلة لإرسال الإشعار');
       return;
     }
 
@@ -326,12 +321,10 @@ class OneSignalNotificationService {
       );
 
       if (response.statusCode != 200) {
-        debugPrint(
-          'فشل إرسال OneSignal: ${response.statusCode} ${response.body}',
-        );
+        return;
       }
-    } on Exception catch (e) {
-      debugPrint('خطأ في إرسال الإشعار عبر OneSignal: $e');
+    } on Exception catch (_) {
+      // الإشعارات غير حرجة ولا توقف مسار التطبيق.
     }
   }
 
@@ -339,8 +332,6 @@ class OneSignalNotificationService {
     final registeredPlayerId = await _getCurrentUserPlayerId(uid);
     return registeredPlayerId ?? _currentPlayerId;
   }
-
-
 
   static Future<String?> sendToCurrentDevice({
     required String title,
@@ -364,21 +355,21 @@ class OneSignalNotificationService {
 
     final playerId = userDoc.data()?['oneSignalPlayerId'] as String?;
     if (playerId == null || playerId.isEmpty) {
-      debugPrint('لا يوجد Player ID للمستخدم الحالي');
       return null;
     }
 
     // ⚠️ فحص إعدادات الإشعارات الشخصية للمستخدم الحالي قبل الإرسال
-    final currentSettings = await SettingsService.getUserNotificationSettings(user.uid);
-    final notificationsEnabled = currentSettings['enableNotifications'] as bool? ?? true;
+    final currentSettings = await SettingsService.getUserNotificationSettings(
+      user.uid,
+    );
+    final notificationsEnabled =
+        currentSettings['enableNotifications'] as bool? ?? true;
     if (!notificationsEnabled) {
-      debugPrint('الإشعارات معطلة للمستخدم الحالي');
       return null;
     }
     final typeKey = _mapTypeToNotificationKey('subscription_notify_new');
     final typeEnabled = currentSettings[typeKey] as bool?;
     if (typeEnabled != null && !typeEnabled) {
-      debugPrint('نوع الإشعار معطل للمستخدم الحالي');
       return null;
     }
 
@@ -406,9 +397,6 @@ class OneSignalNotificationService {
       );
 
       if (response.statusCode != 200) {
-        debugPrint(
-          'فشل إرسال OneSignal: ${response.statusCode} ${response.body}',
-        );
         return null;
       }
 
@@ -416,8 +404,7 @@ class OneSignalNotificationService {
       final ids = responseData['ids'] as List<dynamic>?;
       final messageId = ids?.firstOrNull?.toString();
       return messageId;
-    } on Exception catch (e) {
-      debugPrint('خطأ في إرسال الإشعار عبر OneSignal: $e');
+    } on Exception catch (_) {
       return null;
     }
   }
@@ -426,18 +413,14 @@ class OneSignalNotificationService {
     try {
       final response = await http.delete(
         Uri.parse('https://onesignal.com/api/v1/notifications/$messageId'),
-        headers: {
-          'Authorization': 'Basic $_restApiKey',
-        },
+        headers: {'Authorization': 'Basic $_restApiKey'},
       );
 
       if (response.statusCode != 200 && response.statusCode != 204) {
-        debugPrint(
-          'فشل إلغاء الإشعار OneSignal: ${response.statusCode} ${response.body}',
-        );
+        return;
       }
-    } on Exception catch (e) {
-      debugPrint('خطأ في إلغاء الإشعار عبر OneSignal: $e');
+    } on Exception catch (_) {
+      // تجاهل فشل إلغاء الإشعار غير الحرج.
     }
   }
 
@@ -501,7 +484,8 @@ class OneSignalNotificationService {
     // لا تعِد ربطه بدور أو مستخدم تم التبديل إليه مؤقتاً.
     final authenticatedUser = FirebaseAuth.instance.currentUser;
     final deviceOwnerUid = authenticatedUser?.uid ?? uid;
-    final deviceOwnerOrganization = authenticatedUser?.email ?? organizationEmail;
+    final deviceOwnerOrganization =
+        authenticatedUser?.email ?? organizationEmail;
     await _registerWithRetry(
       () => _doRegisterPlayerIdForUser(
         uid: deviceOwnerUid,
@@ -578,7 +562,8 @@ class OneSignalNotificationService {
     if (docSnapshot.exists) {
       final existingData = docSnapshot.data() ?? {};
       final existingSingle = existingData['oneSignalPlayerId'] as String?;
-      final existingArray = existingData['oneSignalPlayerIds'] as List<dynamic>?;
+      final existingArray =
+          existingData['oneSignalPlayerIds'] as List<dynamic>?;
 
       final mergedIds = <String>{};
       if (existingSingle != null && existingSingle.isNotEmpty) {
@@ -618,8 +603,7 @@ class OneSignalNotificationService {
       try {
         await operation();
         return;
-      } on Exception catch (e) {
-        debugPrint('Registration attempt $attempt failed: $e');
+      } on Exception catch (_) {
         if (attempt == maxAttempts) rethrow;
         await Future.delayed(Duration(milliseconds: baseDelayMs * attempt));
       }

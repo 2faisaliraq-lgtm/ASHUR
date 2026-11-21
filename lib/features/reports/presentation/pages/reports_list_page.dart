@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:material_ui/material_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:intl/intl.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../../../app/routes/app_routes.dart';
 import '../../../../core/email/email_normalization_service.dart';
@@ -109,7 +109,9 @@ class _ReportsListPageState extends State<ReportsListPage> {
     final state = _bloc.state;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) return;
-    final organizationEmail = EmailNormalizationService().normalize(user.email!);
+    final organizationEmail = EmailNormalizationService().normalize(
+      user.email!,
+    );
     if (state is ReportLoaded &&
         state.hasMoreReportsData &&
         !state.isLoadingMoreReports) {
@@ -696,130 +698,141 @@ class _ReportsListPageState extends State<ReportsListPage> {
           color: AssyrianTheme.primaryGold.withValues(alpha: 0.2),
         ),
       ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(8),
-        onTap: () async {
-          final result = await Navigator.of(
-            context,
-          ).pushNamed(AppRoutes.reportDetails, arguments: report);
-          if (result == true || result is ReportEntity) forceRefresh();
-        },
-        leading: CircleAvatar(
-          backgroundColor: statusColor.withValues(alpha: 0.1),
-          radius: 25.r,
-          child: Icon(Icons.analytics, color: statusColor, size: 24.sp),
-        ),
-        title: Text(
-          report.title,
-          style: TextStyle(
-            fontSize: 16.sp,
-            fontWeight: FontWeight.bold,
-            color: AssyrianTheme.deepBlue,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: const EdgeInsets.all(8),
+          onTap: () async {
+            final result = await Navigator.of(
+              context,
+            ).pushNamed(AppRoutes.reportDetails, arguments: report);
+            if (result == true || result is ReportEntity) forceRefresh();
+          },
+          leading: CircleAvatar(
+            backgroundColor: statusColor.withValues(alpha: 0.1),
+            radius: 25.r,
+            child: Icon(Icons.analytics, color: statusColor, size: 24.sp),
           ),
-        ),
-        subtitle: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: 4.h),
-            Text(
-              report.description,
-              style: TextStyle(fontSize: 14.sp, color: Colors.grey[600]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          title: Text(
+            report.title,
+            style: TextStyle(
+              fontSize: 16.sp,
+              fontWeight: FontWeight.bold,
+              color: AssyrianTheme.deepBlue,
             ),
-            SizedBox(height: 2.h),
-            Row(
-              children: [
-                Icon(Icons.category, size: 11.sp, color: Colors.grey[500]),
-                SizedBox(width: 4.w),
-                Text(
-                  typeText,
-                  style: TextStyle(fontSize: 11.sp, color: Colors.grey[500]),
-                ),
-                SizedBox(width: 8.w),
-                Icon(
-                  Icons.calendar_today,
-                  size: 11.sp,
-                  color: Colors.grey[500],
-                ),
-                SizedBox(width: 4.w),
-                Text(
-                  DateFormat('yyyy/MM/dd').format(report.createdAt),
-                  style: TextStyle(fontSize: 11.sp, color: Colors.grey[500]),
-                ),
-              ],
-            ),
-          ],
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
-              decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12.r),
+          ),
+          subtitle: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(height: 4.h),
+              Text(
+                report.description,
+                style: TextStyle(fontSize: 14.sp, color: Colors.grey[600]),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              child: Text(
-                statusText,
-                style: TextStyle(
-                  fontSize: 10.sp,
-                  color: statusColor,
-                  fontWeight: FontWeight.bold,
+              SizedBox(height: 2.h),
+              Row(
+                children: [
+                  Icon(Icons.category, size: 11.sp, color: Colors.grey[500]),
+                  SizedBox(width: 4.w),
+                  Text(
+                    typeText,
+                    style: TextStyle(fontSize: 11.sp, color: Colors.grey[500]),
+                  ),
+                  SizedBox(width: 8.w),
+                  Icon(
+                    Icons.calendar_today,
+                    size: 11.sp,
+                    color: Colors.grey[500],
+                  ),
+                  SizedBox(width: 4.w),
+                  Text(
+                    DateFormat('yyyy/MM/dd').format(report.createdAt),
+                    style: TextStyle(fontSize: 11.sp, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12.r),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 10.sp,
+                    color: statusColor,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
-            ),
-            SizedBox(width: 4.w),
-            PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'view') {
-                  // ⚠️ Placeholder: وظيفة عرض التقرير غير مطبقة — لا يحدث شيء عند اختيار "عرض".
-                  // يجب تنفيذ التنقل إلى ReportDetailsPage أو عرض تفاصيل التقرير هنا.
-                } else if (value == 'download') {
-                  // ⚠️ Placeholder: وظيفة تحميل التقرير غير مطبقة — لا يحدث شيء عند اختيار "تحميل".
-                  // يجب تنفيذ منطق التصدير والتنزيل هنا (يحتاج صلاحية reports_download).
-                } else if (value == 'delete') {
-                  _showDeleteDialog(report);
-                }
-              },
-              itemBuilder: (context) => [
-                if (_canEdit)
-                  PopupMenuItem(
-                    value: 'view',
-                    child: Row(
-                      children: [
-                        Icon(Icons.visibility, size: 18.sp, color: Colors.blue),
-                        SizedBox(width: 8.w),
-                        const Text('عرض'),
-                      ],
+              SizedBox(width: 4.w),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'view') {
+                    // ⚠️ Placeholder: وظيفة عرض التقرير غير مطبقة — لا يحدث شيء عند اختيار "عرض".
+                    // يجب تنفيذ التنقل إلى ReportDetailsPage أو عرض تفاصيل التقرير هنا.
+                  } else if (value == 'download') {
+                    // ⚠️ Placeholder: وظيفة تحميل التقرير غير مطبقة — لا يحدث شيء عند اختيار "تحميل".
+                    // يجب تنفيذ منطق التصدير والتنزيل هنا (يحتاج صلاحية reports_download).
+                  } else if (value == 'delete') {
+                    _showDeleteDialog(report);
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (_canEdit)
+                    PopupMenuItem(
+                      value: 'view',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.visibility,
+                            size: 18.sp,
+                            color: Colors.blue,
+                          ),
+                          SizedBox(width: 8.w),
+                          const Text('عرض'),
+                        ],
+                      ),
                     ),
-                  ),
-                if (_canEdit)
-                  PopupMenuItem(
-                    value: 'download',
-                    child: Row(
-                      children: [
-                        Icon(Icons.download, size: 18.sp, color: Colors.green),
-                        SizedBox(width: 8.w),
-                        const Text('تحميل'),
-                      ],
+                  if (_canEdit)
+                    PopupMenuItem(
+                      value: 'download',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.download,
+                            size: 18.sp,
+                            color: Colors.green,
+                          ),
+                          SizedBox(width: 8.w),
+                          const Text('تحميل'),
+                        ],
+                      ),
                     ),
-                  ),
-                if (_canDelete)
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Row(
-                      children: [
-                        Icon(Icons.delete, size: 18.sp, color: Colors.red),
-                        SizedBox(width: 8.w),
-                        const Text('حذف'),
-                      ],
+                  if (_canDelete)
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, size: 18.sp, color: Colors.red),
+                          SizedBox(width: 8.w),
+                          const Text('حذف'),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

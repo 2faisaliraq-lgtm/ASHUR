@@ -132,17 +132,26 @@ class ExpensesNotificationService {
       final category = expense['category'] as String? ?? 'مصروف';
       final amount = expense['amount'] as num? ?? 0;
 
-      // المصروفات المتأخرة
+      // المصروفات المتأخرة - إدراج في قائمة الانتظار
       if (daysRemaining < 0) {
         if (settings['recurringDueEnabled'] as bool? ?? true) {
           final notificationId = '${expenseId}_overdue_$dayKey';
           if (!shownNotifications.contains(notificationId)) {
-            await _sendOverdueExpenseNotification(
-              expenseId,
-              category,
-              amount,
-              dueDate,
-            );
+            try {
+              await PushNotificationService.enqueueNotification(
+                title: '⚠️ مصروف متأخر الاستحقاق',
+                body:
+                    'مصروف $category بقيمة $amount د.ع متأخر عن موعده (${_formatDate(dueDate)})!',
+                type: 'expenses_alert_pending',
+                scheduledAt: DateTime.now(),
+                data: {
+                  'expense_id': expenseId,
+                  'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+                },
+              );
+            } on FirebaseException catch (_) {
+              continue;
+            }
             shownNotifications.add(notificationId);
             hasChanges = true;
           }
@@ -150,18 +159,27 @@ class ExpensesNotificationService {
         continue;
       }
 
-      // المصروفات القادمة أو المستحقة اليوم
+      // المصروفات القادمة أو المستحقة اليوم - إدراج في قائمة الانتظار
       if ((settings['recurringDueEnabled'] as bool? ?? true) &&
           (warningDaysList.contains(daysRemaining) || daysRemaining == 0)) {
         final notificationId = '${expenseId}_due_${dayKey}_$daysRemaining';
         if (!shownNotifications.contains(notificationId)) {
-          await _sendExpenseNotification(
-            expenseId,
-            category,
-            amount,
-            daysRemaining,
-            dueDate,
-          );
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: مصروف مستحق',
+              body: daysRemaining == 0
+                  ? '$category بقيمة $amount د.ع مستحق اليوم!'
+                  : '$category بقيمة $amount د.ع سيستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})',
+              type: 'expenses_alert_pending',
+              scheduledAt: DateTime.now(),
+              data: {
+                'expense_id': expenseId,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
@@ -202,7 +220,21 @@ class ExpensesNotificationService {
         final notificationId = '${category.key}_overbudget_$dayKey';
         if (!shownNotifications.contains(notificationId)) {
           final exceeded = spent - budget;
-          await _sendOverBudgetNotification(category.key, exceeded, budget);
+          try {
+            await PushNotificationService.enqueueNotification(
+              title: 'تنبيه: تجاوز الميزانية',
+              body:
+                  'فئة "$category.key" تجاوزت الميزانية بـ $exceeded د.ع (الميزانية: $budget د.ع)',
+              type: 'expenses_alert_pending',
+              scheduledAt: DateTime.now(),
+              data: {
+                'category': category.key,
+                'organization_email': FirebaseAuth.instance.currentUser?.email ?? '',
+              },
+            );
+          } on FirebaseException catch (_) {
+            continue;
+          }
           shownNotifications.add(notificationId);
           hasChanges = true;
         }
@@ -215,61 +247,6 @@ class ExpensesNotificationService {
           : shownNotifications;
       await SettingsService.setStringList(_shownNotificationsKey, trimmed);
     }
-  }
-
-  /// ترسل إشعار عن مصروف قريب من الاستحقاق
-  static Future<void> _sendExpenseNotification(
-    String expenseId,
-    String category,
-    num amount,
-    int daysRemaining,
-    DateTime dueDate,
-  ) async {
-    final title = 'تنبيه: مصروف مستحق';
-    final message = daysRemaining == 0
-        ? '$category بقيمة $amount د.ع مستحق اليوم!'
-        : '$category بقيمة $amount د.ع سيستحق خلال $daysRemaining يوم (${_formatDate(dueDate)})';
-
-    await PushNotificationService.showLocalExpenseAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(expenseId, 'due_$daysRemaining'),
-    );
-  }
-
-  /// ترسل إشعار عن مصروف متأخر
-  static Future<void> _sendOverdueExpenseNotification(
-    String expenseId,
-    String category,
-    num amount,
-    DateTime dueDate,
-  ) async {
-    final title = '⚠️ مصروف متأخر الاستحقاق';
-    final message =
-        'مصروف $category بقيمة $amount د.ع متأخر عن موعده (${_formatDate(dueDate)})!';
-
-    await PushNotificationService.showLocalExpenseAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(expenseId, 'overdue'),
-    );
-  }
-
-  /// ترسل إشعار عن تجاوز الميزانية
-  static Future<void> _sendOverBudgetNotification(
-    String category,
-    num exceeded,
-    num budget,
-  ) async {
-    final title = 'تنبيه: تجاوز الميزانية';
-    final message =
-        'فئة "$category" تجاوزت الميزانية بـ $exceeded د.ع (الميزانية: $budget د.ع)';
-
-    await PushNotificationService.showLocalExpenseAlert(
-      title: title,
-      message: message,
-      notificationId: _generateNotificationId(category, 'overbudget'),
-    );
   }
 
   /// تنسيق التاريخ بصيغة سهلة القراءة

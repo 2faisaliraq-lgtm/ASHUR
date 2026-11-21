@@ -715,9 +715,11 @@ class _CustomersListPageState extends State<CustomersListPage> {
           width: isExceedingCreditLimit ? 2 : 1,
         ),
       ),
-      child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
         onTap: () => _showCustomerDetails(customer),
         leading: PopupMenuButton<String>(
           padding: EdgeInsets.zero,
@@ -827,9 +829,10 @@ class _CustomersListPageState extends State<CustomersListPage> {
               _buildDebtInfo(customer),
             ],
           ),
-        ),
-      ),
-    );
+         ),
+       ),
+       ),
+     );
   }
 
   Widget _buildDebtInfo(CustomerEntity customer) {

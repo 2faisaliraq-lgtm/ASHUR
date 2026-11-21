@@ -1563,163 +1563,169 @@ class _InvoicesListPageState extends State<InvoicesListPage> {
       child: Material(
         color: Colors.transparent,
         child: ListTile(
-        contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
-        minTileHeight: 72.h,
-        onTap: () {
-          Navigator.of(
-            context,
-          ).pushNamed(AppRoutes.invoiceDetails, arguments: invoice);
-        },
-        leading: PopupMenuButton<String>(
-          padding: EdgeInsets.zero,
-          constraints: BoxConstraints(minWidth: 100.w),
-          onSelected: (value) {
-            if (value == 'edit') {
-              Navigator.of(
-                context,
-              ).pushNamed('/invoices/edit', arguments: invoice).then((result) {
-                if (result == true || result is InvoiceEntity) {
-                  forceRefresh();
-                }
-              });
-            } else if (value == 'delete') {
-              _showDeleteDialog(invoice);
-            } else if (value == 'import_return') {
-              _importItemsFromInvoice(invoice);
-            }
+          contentPadding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 6.h),
+          minTileHeight: 72.h,
+          onTap: () {
+            Navigator.of(
+              context,
+            ).pushNamed(AppRoutes.invoiceDetails, arguments: invoice);
           },
-          itemBuilder: (context) => [
-            if (_canEditInvoice(invoice))
-              PopupMenuItem(
-                value: 'edit',
-                child: Row(
-                  children: [
-                    Icon(Icons.edit, size: 16.sp, color: Colors.blue),
-                    SizedBox(width: 6.w),
-                    Text('تعديل', style: TextStyle(fontSize: 13.sp)),
-                  ],
-                ),
-              ),
-            if (_canDeleteInvoice(invoice))
-              PopupMenuItem(
-                value: 'delete',
-                child: Row(
-                  children: [
-                    Icon(Icons.delete, size: 16.sp, color: Colors.red),
-                    SizedBox(width: 6.w),
-                    Text('حذف', style: TextStyle(fontSize: 13.sp)),
-                  ],
-                ),
-              ),
-            // ✅ إظهار خيار استيراد مواد فقط للفواتير التي ليست مراجع بيع
-            if (!invoice.isSalesReturn && invoice.type != 'sales_return')
-              PopupMenuItem(
-                value: 'import_return',
-                child: Row(
-                  children: [
-                    Icon(Icons.refresh, size: 16.sp, color: Colors.orange),
-                    SizedBox(width: 6.w),
-                    Text('استيراد للإرجاع', style: TextStyle(fontSize: 13.sp)),
-                  ],
-                ),
-              ),
-          ],
-          child: CircleAvatar(
-            backgroundColor: typeColor.withValues(alpha: 0.1),
-            radius: 22.r,
-            child: Icon(Icons.receipt_long, color: typeColor, size: 20.sp),
-          ),
-        ),
-        title: Text(
-          invoice.invoiceNumber,
-          style: TextStyle(
-            fontSize: 14.sp,
-            fontWeight: FontWeight.bold,
-            color: AssyrianTheme.deepBlue,
-          ),
-        ),
-        subtitle: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(height: 3.h),
-            Text(
-              invoice.customerName,
-              style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            SizedBox(height: 5.h),
-            Row(
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 5.w, vertical: 2.h),
-                  decoration: BoxDecoration(
-                    color: typeColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6.r),
-                  ),
-                  child: Text(
-                    typeText,
-                    style: TextStyle(
-                      fontSize: 10.sp,
-                      color: typeColor,
-                      fontWeight: FontWeight.w600,
-                    ),
+          leading: PopupMenuButton<String>(
+            padding: EdgeInsets.zero,
+            constraints: BoxConstraints(minWidth: 100.w),
+            onSelected: (value) {
+              if (value == 'edit') {
+                Navigator.of(context)
+                    .pushNamed('/invoices/edit', arguments: invoice)
+                    .then((result) {
+                      if (result == true || result is InvoiceEntity) {
+                        forceRefresh();
+                      }
+                    });
+              } else if (value == 'delete') {
+                _showDeleteDialog(invoice);
+              } else if (value == 'import_return') {
+                _importItemsFromInvoice(invoice);
+              }
+            },
+            itemBuilder: (context) => [
+              if (_canEditInvoice(invoice))
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Row(
+                    children: [
+                      Icon(Icons.edit, size: 16.sp, color: Colors.blue),
+                      SizedBox(width: 6.w),
+                      Text('تعديل', style: TextStyle(fontSize: 13.sp)),
+                    ],
                   ),
                 ),
-                SizedBox(width: 8.w),
-                Icon(
-                  Icons.calendar_today,
-                  size: 10.sp,
-                  color: Colors.grey[500],
+              if (_canDeleteInvoice(invoice))
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete, size: 16.sp, color: Colors.red),
+                      SizedBox(width: 6.w),
+                      Text('حذف', style: TextStyle(fontSize: 13.sp)),
+                    ],
+                  ),
                 ),
-                SizedBox(width: 3.w),
-                Text(
-                  _formattingService.formatInvoiceDate(invoice.invoiceDate),
-                  style: TextStyle(fontSize: 10.sp, color: Colors.grey[500]),
+              // ✅ إظهار خيار استيراد مواد فقط للفواتير التي ليست مراجع بيع
+              if (!invoice.isSalesReturn && invoice.type != 'sales_return')
+                PopupMenuItem(
+                  value: 'import_return',
+                  child: Row(
+                    children: [
+                      Icon(Icons.refresh, size: 16.sp, color: Colors.orange),
+                      SizedBox(width: 6.w),
+                      Text(
+                        'استيراد للإرجاع',
+                        style: TextStyle(fontSize: 13.sp),
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+            ],
+            child: CircleAvatar(
+              backgroundColor: typeColor.withValues(alpha: 0.1),
+              radius: 22.r,
+              child: Icon(Icons.receipt_long, color: typeColor, size: 20.sp),
             ),
-          ],
-        ),
-        trailing: IntrinsicWidth(
-          child: Column(
+          ),
+          title: Text(
+            invoice.invoiceNumber,
+            style: TextStyle(
+              fontSize: 14.sp,
+              fontWeight: FontWeight.bold,
+              color: AssyrianTheme.deepBlue,
+            ),
+          ),
+          subtitle: Column(
             mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              SizedBox(height: 3.h),
               Text(
-                _getDisplayAmount(invoice),
-                style: TextStyle(
-                  fontSize: 12.sp,
-                  color: AssyrianTheme.deepBlue,
-                  fontWeight: FontWeight.bold,
-                ),
+                invoice.customerName,
+                style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              SizedBox(height: 3.h),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(5.r),
-                ),
-                child: Text(
-                  statusText,
+              SizedBox(height: 5.h),
+              Row(
+                children: [
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 5.w,
+                      vertical: 2.h,
+                    ),
+                    decoration: BoxDecoration(
+                      color: typeColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6.r),
+                    ),
+                    child: Text(
+                      typeText,
+                      style: TextStyle(
+                        fontSize: 10.sp,
+                        color: typeColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: 8.w),
+                  Icon(
+                    Icons.calendar_today,
+                    size: 10.sp,
+                    color: Colors.grey[500],
+                  ),
+                  SizedBox(width: 3.w),
+                  Text(
+                    _formattingService.formatInvoiceDate(invoice.invoiceDate),
+                    style: TextStyle(fontSize: 10.sp, color: Colors.grey[500]),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          trailing: IntrinsicWidth(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  _getDisplayAmount(invoice),
                   style: TextStyle(
-                    fontSize: 9.sp,
-                    color: statusColor,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 12.sp,
+                    color: AssyrianTheme.deepBlue,
+                    fontWeight: FontWeight.bold,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-              ),
-            ],
+                SizedBox(height: 3.h),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
+                  decoration: BoxDecoration(
+                    color: statusColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(5.r),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      fontSize: 9.sp,
+                      color: statusColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }

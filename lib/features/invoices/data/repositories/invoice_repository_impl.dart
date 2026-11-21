@@ -442,6 +442,7 @@ class InvoiceRepositoryImpl implements InvoiceRepository {
   Future<Either<Failure, List<InvoiceEntity>>> getInvoices(
     String organizationEmail, {
     int? limit,
+    String? customerId,
   }) async {
     try {
       final normalizedEmail = _emailService.normalize(organizationEmail);
@@ -452,9 +453,15 @@ class InvoiceRepositoryImpl implements InvoiceRepository {
       // ✅ تمت إضافة فهرس: isArchived + createdAt
       // ⚠️ الحد 500 سجل: للأ institucions الكبيرة، يُنصح باستخدام getInvoicesPaginated
       // مع startAfterDocument بدلاً من تحميل الكل في مرة واحدة.
-      var query = _getInvoicesCollection(normalizedEmail)
-          .where('isArchived', isEqualTo: false)
-          .orderBy('createdAt', descending: true);
+      var query = _getInvoicesCollection(
+        normalizedEmail,
+      ).where('isArchived', isEqualTo: false);
+      if (customerId != null && customerId.isNotEmpty) {
+        query = query.where('customerId', isEqualTo: customerId);
+      }
+      query = query
+          .orderBy('createdAt', descending: true)
+          .orderBy(FieldPath.documentId);
 
       // تطبيق الحد الأقصى للنتائج فقط إذا تم تمريره (null = جميع البيانات)
       if (limit != null) {
@@ -465,7 +472,9 @@ class InvoiceRepositoryImpl implements InvoiceRepository {
 
       final snapshot = await _handleFirestoreError(
         query.get(),
-        'invoices (isArchived + createdAt)',
+        customerId != null && customerId.isNotEmpty
+            ? 'invoices (isArchived + customerId + createdAt)'
+            : 'invoices (isArchived + createdAt)',
       );
 
       final invoices = snapshot.docs.map(InvoiceModel.fromFirestore).toList();
@@ -583,9 +592,6 @@ class InvoiceRepositoryImpl implements InvoiceRepository {
       final normalizedEmail = _emailService.normalize(organizationEmail);
       return await _getInvoicesCollection(normalizedEmail).doc(invoiceId).get();
     } on Exception catch (_) {
-      // ⚠️ تم التعديل: عدم إخفاء خطأ جلب مستند الفاتورة صامتاً، طباعته للتصحيح
-      // مع إرجاع null للحفاظ على توقيع الدالة ودون انهيار التطبيق.
-      debugPrint('getInvoiceDocument error occurred');
       return null;
     }
   }

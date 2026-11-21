@@ -282,8 +282,8 @@ class RentalBloc extends Bloc<RentalEvent, RentalState> {
                 actorEmail: rentalActorEmail,
                 data: {'rentalId': event.rental.id},
               );
-            } on Exception catch (e) {
-              debugPrint('Failed to send rental_created notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع إنشاء عقد الإيجار.
             }
           }());
         }
@@ -421,8 +421,8 @@ class RentalBloc extends Bloc<RentalEvent, RentalState> {
                 actorEmail: updateRentalActorEmail,
                 data: {'rentalId': event.rental.id},
               );
-            } on Exception catch (e) {
-              debugPrint('Failed to send rental_updated notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع تحديث عقد الإيجار.
             }
           }());
         }
@@ -523,8 +523,8 @@ class RentalBloc extends Bloc<RentalEvent, RentalState> {
                 actorEmail: deleteRentalActorEmail,
                 data: {'rentalId': event.id},
               );
-            } on Exception catch (e) {
-              debugPrint('Failed to send rental_deleted notification: $e');
+            } on Exception catch (_) {
+              // فشل الإشعار لا يمنع حذف عقد الإيجار.
             }
           }());
         }
@@ -720,8 +720,8 @@ class RentalBloc extends Bloc<RentalEvent, RentalState> {
                   actorEmail: returnRentalActorEmail,
                   data: {'rentalId': returnedRental.id},
                 );
-              } on Exception catch (e) {
-                debugPrint('Failed to send rental_returned notification: $e');
+              } on Exception catch (_) {
+                // فشل الإشعار لا يمنع تسجيل إرجاع الوحدة.
               }
             }());
           }
@@ -959,8 +959,7 @@ class RentalBloc extends Bloc<RentalEvent, RentalState> {
         return true;
       }
       return false;
-    } on Exception catch (e) {
-      debugPrint('Failed to create automatic rental invoice: $e');
+    } on Exception catch (_) {
       return false;
     }
   }

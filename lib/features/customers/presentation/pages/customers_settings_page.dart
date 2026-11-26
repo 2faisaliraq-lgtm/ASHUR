@@ -66,7 +66,9 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
   bool _notifyCustomerUpdated = false;
   bool _alertCreditLimit = false;
   bool _alertHighDebt = false;
-  List<int> _customerWarningDays = [1, 2, 3];
+
+  // تكرار تذكير ديون العملاء (يومي، أسبوعي، شهري، لا شيء)
+  String _customerDebtReminderFrequency = 'daily';
 
   @override
   void initState() {
@@ -138,6 +140,10 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
             _alertCreditLimit = userSettings['customer_alert_credit_limit'] as bool? ?? false;
             _alertHighDebt = userSettings['customer_alert_high_debt'] as bool? ?? false;
 
+            // تحميل تكرار تذكير ديون العملاء
+            _customerDebtReminderFrequency =
+                userSettings['customer_debt_reminder'] as String? ?? 'daily';
+
             // ✅ قراءة reminderDaysBefore من الإعدادات الشخصية إذا كانت موجودة
             final personalReminderDays =
                 userSettings['reminderDaysBefore'] as int?;
@@ -145,16 +151,6 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
               _reminderDaysBefore = personalReminderDays;
             }
 
-            // ✅ قراءة warningDays من الإعدادات الشخصية إذا كانت موجودة
-            final personalWarningDays = userSettings['warningDays'] as List<dynamic>?;
-            if (personalWarningDays != null && personalWarningDays.isNotEmpty) {
-              // حفظها للاستخدام في الإشعارات
-              _customerWarningDays =
-                  personalWarningDays
-                      .map((day) => int.tryParse(day.toString()) ?? 1)
-                      .toList()
-                    ..sort();
-            }
           });
         }
       }
@@ -247,14 +243,15 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
         _alertHighDebt,
       );
 
-      // ✅ حفظ أيام التنبيه والتذكير في الإعدادات الشخصية لكل مستخدم
+      // حفظ تكرار تذكير ديون العملاء في الإعدادات الشخصية
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         await SettingsService.saveUserNotificationSettings(uid, {
-          'reminderDaysBefore': _reminderDaysBefore,
-          'warningDays': _customerWarningDays,
+          'customer_debt_reminder': _customerDebtReminderFrequency,
         });
       }
+
+      // ✅ حفظ أيام التنبيه والتذكير في الإعدادات الشخصية لكل مستخدم
 
       if (mounted) {
         // إغلاق نافذة التحميل
@@ -810,6 +807,11 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
                 (value) => setState(() => _alertHighDebt = value),
                 Icons.account_balance,
               ),
+              _buildReminderFrequencyTile(
+                'customer_debt_reminder',
+                'تكرار تذكير ديون العملاء',
+                'اختر مدة التذكير بالعملاء الذين لديهم ديون',
+              ),
             ],
           ),
         ),
@@ -1094,6 +1096,38 @@ class _CustomersSettingsPageState extends State<CustomersSettingsPage> {
           tooltip: 'تحديث',
         ),
       ],
+    );
+  }
+
+  Widget _buildReminderFrequencyTile(String sectionKey, String title, String subtitle) {
+    final current = _customerDebtReminderFrequency;
+    final items = const [
+      {'label': 'يومياً', 'value': 'daily'},
+      {'label': 'أسبوعياً', 'value': 'weekly'},
+      {'label': 'شهراً', 'value': 'monthly'},
+      {'label': 'لا شيء', 'value': 'none'},
+    ];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: AssyrianTheme.ivoryWhite.withValues(alpha: 0.5),
+        border: Border.all(color: AssyrianTheme.primaryGold.withValues(alpha: 0.15)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: DropdownButtonFormField<String>(
+        initialValue: current,
+        decoration: InputDecoration(
+          labelText: title,
+          hintText: subtitle,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        items: items.map((e) => DropdownMenuItem<String>(
+          value: e['value'],
+          child: Text(e['label'] as String, style: const TextStyle(fontSize: 13)),
+        )).toList(),
+        onChanged: (val) => setState(() => _customerDebtReminderFrequency = val ?? 'daily'),
+      ),
     );
   }
 }

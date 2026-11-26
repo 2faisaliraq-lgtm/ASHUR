@@ -125,6 +125,7 @@ class RoutePaths {
   // ========== مسارات الإعدادات ==========
   static const String settings = '/settings';
   static const String systemSettings = '/settings/system';
+  static const String modulesSettings = '/settings/modules';
   static const String formattingSettings = '/settings/formatting';
   static const String notificationSettings = '/settings/notifications';
   static const String settingsList = '/settings/list';

@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:onesignal_flutter/onesignal_flutter.dart';
 
 import '../email/email_normalization_service.dart';
+import '../services/session_service.dart';
 import '../services/settings_service.dart';
 
 class OneSignalNotificationService {
@@ -175,6 +176,7 @@ class OneSignalNotificationService {
                 ),
               ).catchError((Object _) {}),
             );
+            unawaited(OneSignal.login(user.uid));
           }
         });
         _hasSubscriptionObserver = true;
@@ -187,6 +189,7 @@ class OneSignalNotificationService {
           unawaited(() async {
             try {
               await _registerWithRetry(() => registerCurrentUserPlayerId());
+              await OneSignal.login(user.uid);
             } on Exception catch (_) {
               // إعادة التسجيل تحاول مجدداً عند تغير حالة المصادقة.
             }
@@ -480,16 +483,13 @@ class OneSignalNotificationService {
     required String uid,
     required String organizationEmail,
   }) async {
-    // اشتراك OneSignal مرتبط بمالك الجهاز المسجل دخوله.
-    // لا تعِد ربطه بدور أو مستخدم تم التبديل إليه مؤقتاً.
-    final authenticatedUser = FirebaseAuth.instance.currentUser;
-    final deviceOwnerUid = authenticatedUser?.uid ?? uid;
-    final deviceOwnerOrganization =
-        authenticatedUser?.email ?? organizationEmail;
+    // اشتراك OneSignal مرتبط بالمستخدم الفعلي المارر (الموظف بعد التبديل).
+    // لا نستخدم FirebaseAuth.instance.currentUser لأن التبديل يتم عبر المدير
+    // ويبقى المستخدم المصادّق هو المدير بدلاً من المستخدم الفعلي.
     await _registerWithRetry(
       () => _doRegisterPlayerIdForUser(
-        uid: deviceOwnerUid,
-        organizationEmail: deviceOwnerOrganization,
+        uid: uid,
+        organizationEmail: organizationEmail,
       ),
     );
   }
@@ -498,7 +498,23 @@ class OneSignalNotificationService {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    await _registerWithRetry(() => _doRegisterCurrentUserPlayerId(user: user));
+    // التحقق من وجود مستخدم مبدل (الموظف الفعلي بعد التبديل من المدير)
+    // FirebaseAuth.instance.currentUser يظل المدير، لكن المستخدم الفعلي قد يكون موظفاً مبدلاً إليه
+    final switchedUser = await SessionService.getSwitchedUser();
+    final switchedUserId = switchedUser?['id']?.toString();
+    final switchedUserEmail = switchedUser?['email']?.toString();
+
+    // استخدام معرف المستخدم المبدل إذا وجد، وإلا استخدام المستخدم المصادّق حالياً
+    final effectiveUid = switchedUserId?.isNotEmpty == true ? switchedUserId! : user.uid;
+    final effectiveEmail = switchedUserEmail?.isNotEmpty == true ? switchedUserEmail! : user.email;
+
+    if (effectiveEmail == null || effectiveEmail.isEmpty) return;
+
+    await _registerWithRetry(() => _doRegisterCurrentUserPlayerId(
+      user: user,
+      effectiveUid: effectiveUid,
+      effectiveEmail: effectiveEmail,
+    ));
   }
 
   static Future<void> _doRegisterPlayerIdForUser({
@@ -518,15 +534,18 @@ class OneSignalNotificationService {
   static Future<void> _doRegisterCurrentUserPlayerId({
     required User user,
     String? playerId,
+    String? effectiveUid,
+    String? effectiveEmail,
   }) async {
     final currentPlayerId = playerId ?? await _waitForPlayerId();
     if (currentPlayerId == null) return;
 
-    final organizationEmail = user.email;
-    if (organizationEmail == null) return;
+    final uid = effectiveUid ?? user.uid;
+    final organizationEmail = effectiveEmail ?? user.email;
+    if (organizationEmail == null || organizationEmail.isEmpty) return;
 
     await _storePlayerId(
-      uid: user.uid,
+      uid: uid,
       organizationEmail: organizationEmail,
       playerId: currentPlayerId,
     );
@@ -552,9 +571,44 @@ class OneSignalNotificationService {
         .doc('users')
         .collection('users');
 
-    // ✅ لا نحذف Player ID من أي مستخدم آخر.
-    // كل مستخدم يحتفظ(Player IDs) الخاصة به بشكل مستقل.
-    // إزالة الحذف تمنع فقدان الإشعارات للمستخدمين الآخرين عند تسجيل مستخدم جديد.
+    // ✅ ضمان أن الجهاز مربوط بمستخدم واحد فقط في المؤسسة.
+    // أزل هذا playerId من جميع المستخدمين الآخرين قبل ربطه بالمستخدم الحالي.
+    try {
+      // إزالة من الحقل المصفوفة oneSignalPlayerIds
+      final arrayDocs = await usersRef
+          .where('oneSignalPlayerIds', arrayContains: playerId)
+          .get();
+      for (final doc in arrayDocs.docs) {
+        if (doc.id == uid) continue;
+        final data = doc.data();
+        final existingArray = (data['oneSignalPlayerIds'] as List<dynamic>?)
+            ?.where((e) => e is String && e != playerId)
+            .toList() ?? [];
+        final existingSingle = data['oneSignalPlayerId'] as String?;
+        final newSingle =
+            existingSingle == playerId
+                ? (existingArray.isNotEmpty ? existingArray.first : null)
+                : existingSingle;
+        await doc.reference.update({
+          'oneSignalPlayerId': newSingle,
+          'oneSignalPlayerIds': existingArray,
+        });
+      }
+
+      // إزالة من الحقل المفرد oneSignalPlayerId (إذا لم يكن موجوداً في المصفوفة)
+      final singleDocs = await usersRef
+          .where('oneSignalPlayerId', isEqualTo: playerId)
+          .get();
+      for (final doc in singleDocs.docs) {
+        if (doc.id == uid) continue;
+        await doc.reference.update({
+          'oneSignalPlayerId': null,
+          'oneSignalPlayerIds': FieldValue.arrayRemove([playerId]),
+        });
+      }
+    } on Exception catch (_) {
+      // فشل التنظيف من المستخدمين الآخرين لا يمنع تسجيل الجهاز للمستخدم الحالي.
+    }
 
     final docRef = usersRef.doc(uid);
     final docSnapshot = await docRef.get();

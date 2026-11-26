@@ -30,10 +30,6 @@ class SectionNotificationService {
     return hash;
   }
 
-  static DateTime _normalizeDate(DateTime date) {
-    return DateTime(date.year, date.month, date.day);
-  }
-
   static String _formatDate(DateTime date) {
     final monthNames = [
       'يناير',
@@ -80,44 +76,107 @@ class SectionNotificationService {
     return '$_shownNotificationsPrefix${userId}_$sectionKey';
   }
 
-  static Future<List<String>> _getShownList(String sectionKey) async {
+  static Future<Map<String, int>> _getShownList(String sectionKey) async {
     await SettingsService.ensurePreferencesInitialized();
     final deviceKey = await _deviceNotificationsKey(sectionKey);
     final userKey = await _userNotificationsKey(sectionKey);
 
     // دمج الإشعارات من مستوى الجهاز ومستوى المستخدم
-    final deviceShown = List<String>.from(
-      SettingsService.getStringList(deviceKey) ?? [],
-    );
-    final userShown = List<String>.from(
-      SettingsService.getStringList(userKey) ?? [],
-    );
+    final deviceShown = SettingsService.getStringList(deviceKey) ?? [];
+    final userShown = SettingsService.getStringList(userKey) ?? [];
 
-    final merged = <String>{...deviceShown, ...userShown}.toList();
+    final merged = <String, int>{};
+    for (final entry in [...deviceShown, ...userShown]) {
+      final parts = entry.split(':');
+      if (parts.length == 2) {
+        final id = parts[0];
+        final ts = int.tryParse(parts[1]) ?? 0;
+        merged[id] = ts;
+      }
+    }
     return merged;
   }
 
   static Future<void> _saveShownList(
     String sectionKey,
-    List<String> list,
+    Map<String, int> map,
   ) async {
     await SettingsService.ensurePreferencesInitialized();
     final deviceKey = await _deviceNotificationsKey(sectionKey);
     final userKey = await _userNotificationsKey(sectionKey);
 
     final currentDevice = SettingsService.getStringList(deviceKey) ?? [];
-    final mergedDevice = <String>{...currentDevice, ...list}.toList();
-    final trimmedDevice = mergedDevice.length > 200
-        ? mergedDevice.sublist(mergedDevice.length - 200)
-        : mergedDevice;
-    await SettingsService.setStringList(deviceKey, trimmedDevice);
+    final mergedDevice = <String, int>{};
+    for (final entry in currentDevice) {
+      final parts = entry.split(':');
+      if (parts.length == 2) {
+        mergedDevice[parts[0]] = int.tryParse(parts[1]) ?? 0;
+      }
+    }
+    mergedDevice.addAll(map);
+    final trimmedDevice = _trimMap(mergedDevice);
+    await SettingsService.setStringList(
+      deviceKey,
+      trimmedDevice.entries.map((e) => '${e.key}:${e.value}').toList(),
+    );
 
     final currentUser = SettingsService.getStringList(userKey) ?? [];
-    final mergedUser = <String>{...currentUser, ...list}.toList();
-    final trimmedUser = mergedUser.length > 200
-        ? mergedUser.sublist(mergedUser.length - 200)
-        : mergedUser;
-    await SettingsService.setStringList(userKey, trimmedUser);
+    final mergedUser = <String, int>{};
+    for (final entry in currentUser) {
+      final parts = entry.split(':');
+      if (parts.length == 2) {
+        mergedUser[parts[0]] = int.tryParse(parts[1]) ?? 0;
+      }
+    }
+    mergedUser.addAll(map);
+    final trimmedUser = _trimMap(mergedUser);
+    await SettingsService.setStringList(
+      userKey,
+      trimmedUser.entries.map((e) => '${e.key}:${e.value}').toList(),
+    );
+  }
+
+  static Map<String, int> _trimMap(Map<String, int> map) {
+    if (map.length <= 200) return map;
+    final sorted = map.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return Map.fromEntries(sorted.take(200));
+  }
+
+  /// التحقق من إمكانية عرض التذكير بناءً على التكرار المحدد
+  static Future<bool> _shouldShowReminder(
+    String sectionKey,
+    String notificationId,
+    Map<String, int> shownMap,
+  ) async {
+    final lastShown = shownMap[notificationId];
+    if (lastShown == null) return true; // لم يُshown من قبل
+
+    final frequency = await SettingsService.getReminderFrequency(
+      _getCurrentUserId(),
+      sectionKey,
+    );
+
+    if (frequency == 'none') return false;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final diffMs = now - lastShown;
+
+    switch (frequency) {
+      case 'daily':
+        return diffMs >= Duration(days: 1).inMilliseconds;
+      case 'weekly':
+        return diffMs >= Duration(days: 7).inMilliseconds;
+      case 'monthly':
+        return diffMs >= Duration(days: 30).inMilliseconds;
+      default:
+        return true;
+    }
+  }
+
+  static String _getCurrentUserId() {
+    final user = FirebaseAuth.instance.currentUser;
+    return user?.uid ?? user?.email ?? 'default';
   }
 
   static Future<bool> isSectionNotificationsEnabled(String sectionKey) async {
@@ -266,17 +325,15 @@ class SectionNotificationService {
     final summary = SectionBadgeService.buildInventorySummary(products);
     if (!summary.hasUrgentItems) return;
 
-    final now = _normalizeDate(DateTime.now());
-    final dayKey = '${now.year}-${now.month}-${now.day}';
     final shown = await _getShownList('inventory');
     var hasChanges = false;
 
     for (final product in summary.urgentProducts) {
       final isOut = product.isOutOfStock;
-      final key = 'prod_${product.id}_${isOut ? 'out' : 'low'}_$dayKey';
-      if (shown.contains(key)) continue;
+      final key = 'prod_${product.id}_${isOut ? 'out' : 'low'}';
+      if (!(await _shouldShowReminder('inventory', key, shown))) continue;
       final notificationId = _generateId(
-        '${product.id}_$dayKey',
+        product.id,
         'prod_$isOut',
       );
 
@@ -304,7 +361,7 @@ class SectionNotificationService {
         notificationId: notificationId,
       );
 
-      shown.add(key);
+      shown[key] = DateTime.now().millisecondsSinceEpoch;
       hasChanges = true;
     }
 
@@ -385,8 +442,6 @@ class SectionNotificationService {
     final summary = SectionBadgeService.buildCustomerSummary(customers);
     if (!summary.hasUrgentItems) return;
 
-    final now = _normalizeDate(DateTime.now());
-    final dayKey = '${now.year}-${now.month}-${now.day}';
     final shown = await _getShownList('customers');
     var hasChanges = false;
 
@@ -396,7 +451,7 @@ class SectionNotificationService {
           limit != null && limit > 0 && customer.totalDebt > limit;
       final key =
           'cust_${customer.id}_${isExceeded ? 'exceeded' : 'high'}';
-      if (shown.contains(key)) continue;
+      if (!(await _shouldShowReminder('customers', key, shown))) continue;
       final notificationId = _generateId(
         customer.id,
         'cust_$isExceeded',
@@ -425,7 +480,7 @@ class SectionNotificationService {
         notificationId: notificationId,
       );
 
-      shown.add(key);
+      shown[key] = DateTime.now().millisecondsSinceEpoch;
       hasChanges = true;
     }
 
@@ -557,8 +612,6 @@ class SectionNotificationService {
     final summary = SectionBadgeService.buildMaintenanceSummary(requests);
     if (!summary.hasUrgentItems) return;
 
-    final now = _normalizeDate(DateTime.now());
-    final dayKey = '${now.year}-${now.month}-${now.day}';
     final shown = await _getShownList('maintenance');
     var hasChanges = false;
 
@@ -566,11 +619,10 @@ class SectionNotificationService {
       final isOverdue =
           request.scheduledDate != null &&
           request.scheduledDate!.isBefore(DateTime.now());
-      final key =
-          'maint_${request.id}_${isOverdue ? 'overdue' : 'urgent'}_$dayKey';
-      if (shown.contains(key)) continue;
+      final key = 'maint_${request.id}_${isOverdue ? 'overdue' : 'urgent'}';
+      if (!(await _shouldShowReminder('maintenance', key, shown))) continue;
       final notificationId = _generateId(
-        '${request.id}_$dayKey',
+        request.id,
         'maint_$isOverdue',
       );
       final isTypeEnabled = await SettingsService.isNotificationTypeEnabled(
@@ -598,7 +650,7 @@ class SectionNotificationService {
         notificationId: notificationId,
       );
 
-      shown.add(key);
+      shown[key] = DateTime.now().millisecondsSinceEpoch;
       hasChanges = true;
     }
 
@@ -654,19 +706,16 @@ class SectionNotificationService {
     final summary = SectionBadgeService.buildRentalSummary(rentals);
     if (!summary.hasUrgentItems) return;
 
-    final now = _normalizeDate(DateTime.now());
-    final dayKey = '${now.year}-${now.month}-${now.day}';
     final shown = await _getShownList('rentals');
     var hasChanges = false;
 
     for (final rental in summary.urgentRentals) {
       final days = rental.endDate.difference(DateTime.now()).inDays;
       final isExpired = days < 0;
-      final key =
-          'rent_${rental.id}_${isExpired ? 'expired' : 'expiring'}_$dayKey';
-      if (shown.contains(key)) continue;
+      final key = 'rent_${rental.id}_${isExpired ? 'expired' : 'expiring'}';
+      if (!(await _shouldShowReminder('rentals', key, shown))) continue;
       final notificationId = _generateId(
-        '${rental.id}_$dayKey',
+        rental.id,
         'rent_$isExpired',
       );
       final isTypeEnabled = await SettingsService.isNotificationTypeEnabled(
@@ -698,7 +747,7 @@ class SectionNotificationService {
         notificationId: notificationId,
       );
 
-      shown.add(key);
+      shown[key] = DateTime.now().millisecondsSinceEpoch;
       hasChanges = true;
     }
 
@@ -750,15 +799,13 @@ class SectionNotificationService {
     final summary = SectionBadgeService.buildExpenseSummary(expenses);
     if (!summary.hasUrgentItems) return;
 
-    final now = _normalizeDate(DateTime.now());
-    final dayKey = '${now.year}-${now.month}-${now.day}';
     final shown = await _getShownList('expenses');
     var hasChanges = false;
 
     for (final expense in summary.urgentExpenses) {
-      final key = 'exp_${expense.id}_$dayKey';
-      if (shown.contains(key)) continue;
-      final notificationId = _generateId('${expense.id}_$dayKey', 'exp');
+      final key = 'exp_${expense.id}';
+      if (!(await _shouldShowReminder('expenses', key, shown))) continue;
+      final notificationId = _generateId(expense.id, 'exp');
       final isTypeEnabled = await SettingsService.isNotificationTypeEnabled(
         'expenses_alert_pending',
       );
@@ -774,7 +821,7 @@ class SectionNotificationService {
         notificationId: notificationId,
       );
 
-      shown.add(key);
+      shown[key] = DateTime.now().millisecondsSinceEpoch;
       hasChanges = true;
     }
 

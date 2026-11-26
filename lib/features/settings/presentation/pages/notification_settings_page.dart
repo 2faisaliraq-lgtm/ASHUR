@@ -33,6 +33,17 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
   bool _enableVibration = true;
   bool _enableSectionBadges = true;
 
+  // تكرار التذكير الدوري لكل قسم (none, daily, weekly, monthly)
+  final Map<String, String> _reminderFrequencies = {
+    'customer_debt_reminder': 'daily',
+    'subscription_reminder': 'daily',
+    'invoice_overdue_reminder': 'daily',
+    'maintenance_overdue_reminder': 'daily',
+    'rental_expired_reminder': 'daily',
+    'inventory_low_stock_reminder': 'daily',
+    'expenses_pending_reminder': 'daily',
+  };
+
   // خريطة مفاتيح الإشعارات التفصيلية لكل قسم (معطلة افتراضياً: false)
   final Map<String, bool> _notificationToggles = {
     // الفواتير
@@ -122,6 +133,12 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
           _enableVibration = settings['enableVibration'] ?? true;
           _enableSectionBadges = settings['enableSectionBadges'] ?? true;
 
+          // تحميل تكرار التذكير الدوري لكل قسم
+          for (final key in _reminderFrequencies.keys) {
+            _reminderFrequencies[key] =
+                settings[key] as String? ?? _reminderFrequencies[key] ?? 'daily';
+          }
+
           // تحميل حالة كل نوع إشعار مع احترام القيمة الافتراضية المحددة للخيار.
           for (final key in _notificationToggles.keys) {
             _notificationToggles[key] =
@@ -163,6 +180,10 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'enableSound': _enableSound,
         'enableVibration': _enableVibration,
         'enableSectionBadges': _enableSectionBadges,
+
+        // حفظ تكرار التذكير الدوري لكل قسم
+        for (final entry in _reminderFrequencies.entries)
+          entry.key: entry.value,
       };
 
       // حفظ مفاتيح الإشعارات التفصيلية
@@ -398,6 +419,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'invoice_alert_unpaid',
         Icons.pending_actions,
       ),
+      _buildReminderFrequencyTile(
+        'invoice_overdue_reminder',
+        'تكرار تذكير الفواتير المتأخرة',
+        'اختر مدة التذكير بالفواتير المتأخرة عن السداد',
+      ),
     ]);
   }
 
@@ -439,6 +465,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'customer_alert_high_debt',
         Icons.account_balance,
       ),
+      _buildReminderFrequencyTile(
+        'customer_debt_reminder',
+        'تكرار تذكير ديون العملاء',
+        'اختر مدة التذكير بالعملاء الذين لديهم ديون',
+      ),
     ]);
   }
 
@@ -473,6 +504,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'تنبيه عند انخفاض كمية المادة إلى الحد الأدنى المحدد',
         'inventory_alert_low_stock',
         Icons.production_quantity_limits,
+      ),
+      _buildReminderFrequencyTile(
+        'inventory_low_stock_reminder',
+        'تكرار تذكير المخزون المنخفض',
+        'اختر مدة التذكير بالمواد منخفضة المخزون',
       ),
     ]);
   }
@@ -515,6 +551,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'subscription_alert_expiring_soon',
         Icons.notification_important,
       ),
+      _buildReminderFrequencyTile(
+        'subscription_reminder',
+        'تكرار تذكير الاشتراكات',
+        'اختر مدة التذكير بالاشتراكات المنتهية أو القريبة من الانتهاء',
+      ),
     ]);
   }
 
@@ -555,6 +596,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'تنبيه بالطلبات التي تأخرت عن موعدها المجدول',
         'maintenance_alert_overdue',
         Icons.running_with_errors,
+      ),
+      _buildReminderFrequencyTile(
+        'maintenance_overdue_reminder',
+        'تكرار تذكير الصيانة المتأخرة',
+        'اختر مدة التذكير بطلبات الصيانة المتأخرة',
       ),
     ]);
   }
@@ -597,6 +643,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'rental_alert_expiring_soon',
         Icons.access_time,
       ),
+      _buildReminderFrequencyTile(
+        'rental_expired_reminder',
+        'تكرار تذكير التأجير المتأخر',
+        'اختر مدة التذكير بعقود التأجير المتأخرة',
+      ),
     ]);
   }
 
@@ -625,6 +676,11 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         'تنبيه بالمصروفات التي بانتظار المراجعة والاعتماد',
         'expenses_alert_pending',
         Icons.hourglass_top,
+      ),
+      _buildReminderFrequencyTile(
+        'expenses_pending_reminder',
+        'تكرار تذكير المصروفات المعلقة',
+        'اختر مدة التذكير بالمصروفات بانتظار المراجعة',
       ),
     ]);
   }
@@ -762,6 +818,38 @@ class _NotificationSettingsPageState extends State<NotificationSettingsPage> {
         activeTrackColor: AssyrianTheme.primaryGold.withValues(alpha: 0.3),
           secondary: Icon(icon, color: AssyrianTheme.deepBlue, size: 20.sp),
         ),
+      ),
+    );
+  }
+
+  Widget _buildReminderFrequencyTile(String sectionKey, String title, String subtitle) {
+    final current = _reminderFrequencies[sectionKey] ?? 'daily';
+    final items = const [
+      {'label': 'يومياً', 'value': 'daily'},
+      {'label': 'أسبوعياً', 'value': 'weekly'},
+      {'label': 'شهراً', 'value': 'monthly'},
+      {'label': 'لا شيء', 'value': 'none'},
+    ];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: AssyrianTheme.ivoryWhite.withValues(alpha: 0.5),
+        border: Border.all(color: AssyrianTheme.primaryGold.withValues(alpha: 0.15)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: DropdownButtonFormField<String>(
+        initialValue: current,
+        decoration: InputDecoration(
+          labelText: title,
+          hintText: subtitle,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        items: items.map((e) => DropdownMenuItem<String>(
+          value: e['value'],
+          child: Text(e['label'] as String, style: const TextStyle(fontSize: 13)),
+        )).toList(),
+        onChanged: (val) => setState(() => _reminderFrequencies[sectionKey] = val ?? 'daily'),
       ),
     );
   }

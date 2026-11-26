@@ -99,17 +99,20 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                 _buildDrawerItem(
                   context,
                   icon: Icons.dashboard_outlined,
-                  title: 'لوحة التحكم',
-                  isSelected: widget.currentRoute == '/settings/dashboard',
+                  title: 'لوحة الإعدادات',
+                  isSelected: widget.currentRoute == '/settings' ||
+                      widget.currentRoute == '/settings/list',
                   onTap: () => _navigateToPage(context, AppRoutes.settingsList),
                 ),
-                _buildDrawerItem(
-                  context,
-                  icon: Icons.settings_outlined,
-                  title: 'الإعدادات العامة',
-                  isSelected: widget.currentRoute == '/settings',
-                  onTap: () => _navigateToPage(context, AppRoutes.settings),
-                ),
+                if (_hasPermission('settings_view'))
+                  _buildDrawerItem(
+                    context,
+                    icon: Icons.settings_outlined,
+                    title: 'بيانات الشركة والنظام',
+                    isSelected: widget.currentRoute == '/settings/system',
+                    onTap: () =>
+                        _navigateToPage(context, AppRoutes.systemSettings),
+                  ),
               ],
             ),
             _buildDrawerSection(
@@ -123,7 +126,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                   title: 'إدارة الأقسام',
                   isSelected: widget.currentRoute == '/settings/modules',
                   onTap: () =>
-                      _navigateToPage(context, AppRoutes.systemSettings),
+                      _navigateToPage(context, AppRoutes.modulesSettings),
                 ),
                 _buildDrawerItem(
                   context,
@@ -152,7 +155,7 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
             ),
             _buildDrawerSection(
               context,
-              title: 'إعدادات الأقسام',
+              title: 'إعدادات الوحدات',
               icon: Icons.category,
               items: [
                 if (_hasPermission('invoices_settings_view'))
@@ -231,46 +234,6 @@ class _SettingsDrawerState extends State<SettingsDrawer> {
                     title: 'المستخدمين',
                     isSelected: widget.currentRoute == '/users/settings',
                     onTap: () => _navigateToPage(context, '/users/settings'),
-                  ),
-              ],
-            ),
-            _buildDrawerSection(
-              context,
-              title: 'أدوات متقدمة',
-              icon: Icons.construction,
-              items: [
-                if (_hasPermission('settings_advanced'))
-                  _buildDrawerItem(
-                    context,
-                    icon: Icons.swap_horiz_outlined,
-                    title: 'ترحيل المعرفات',
-                    isSelected: widget.currentRoute == '/settings/id-migration',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      // Add ID migration route when available
-                    },
-                  ),
-                if (_hasPermission('settings_advanced'))
-                  _buildDrawerItem(
-                    context,
-                    icon: Icons.backup_outlined,
-                    title: 'النسخ الاحتياطي',
-                    isSelected: widget.currentRoute == '/settings/backup',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      // Add backup route when available
-                    },
-                  ),
-                if (_hasPermission('settings_advanced'))
-                  _buildDrawerItem(
-                    context,
-                    icon: Icons.security_outlined,
-                    title: 'الأمان والصلاحيات',
-                    isSelected: widget.currentRoute == '/settings/security',
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      // Add security route when available
-                    },
                   ),
               ],
             ),

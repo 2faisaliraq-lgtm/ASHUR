@@ -54,6 +54,7 @@ class AppRoutes {
   static const String maintenanceSettings = RoutePaths.maintenanceSettings;
   static const String rentalsSettings = RoutePaths.rentalsSettings;
   static const String systemSettings = RoutePaths.systemSettings;
+  static const String modulesSettings = RoutePaths.modulesSettings;
   static const String formattingSettings = RoutePaths.formattingSettings;
   static const String notificationSettings = RoutePaths.notificationSettings;
   static const String inventory = RoutePaths.inventory;

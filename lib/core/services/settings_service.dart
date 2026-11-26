@@ -863,4 +863,29 @@ class SettingsService {
 
     return await getUserNotificationSettings(user.uid);
   }
+
+  /// جلب تكرار التذكير لقسم معين للمستخدم الحالي
+  static Future<String> getReminderFrequency(String uid, String sectionKey) async {
+    try {
+      final settings = await getUserNotificationSettings(uid);
+      return settings[sectionKey] as String? ?? 'daily';
+    } on Exception catch (_) {
+      return 'daily';
+    }
+  }
+
+  /// حفظ تكرار التذكير لقسم معين للمستخدم الحالي
+  static Future<void> saveReminderFrequency(
+    String uid,
+    String sectionKey,
+    String frequency,
+  ) async {
+    try {
+      final settings = await getUserNotificationSettings(uid);
+      settings[sectionKey] = frequency;
+      await saveUserNotificationSettings(uid, settings);
+    } on Exception catch (_) {
+      // تجاهل الأخطاء silencious
+    }
+  }
 }

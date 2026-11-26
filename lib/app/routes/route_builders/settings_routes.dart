@@ -4,6 +4,7 @@ import '../../../core/widgets/loading_widget.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../../features/settings/presentation/pages/formatting_settings_page.dart';
+import '../../../features/settings/presentation/pages/modules_settings_page.dart';
 import '../../../features/settings/presentation/pages/notification_settings_page.dart';
 import '../../../features/settings/presentation/pages/pdf_settings_page.dart';
 import '../../../features/settings/presentation/pages/settings_page.dart';
@@ -45,6 +46,7 @@ Map<String, WidgetBuilder> get settingsRoutes => {
     );
   },
   RoutePaths.systemSettings: (context) => const SettingsPage(),
+  RoutePaths.modulesSettings: (context) => const ModulesSettingsPage(),
   RoutePaths.formattingSettings: (context) => const FormattingSettingsPage(),
   RoutePaths.notificationSettings: (context) =>
       const NotificationSettingsPage(),
